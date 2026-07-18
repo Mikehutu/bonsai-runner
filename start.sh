@@ -100,6 +100,7 @@ fi
 
 # ─── Step 2: Install huggingface-hub CLI ──────────────────────────────
 HF_CMD=""
+HF_VENV=""
 if command -v huggingface-cli &>/dev/null; then
   HF_CMD="huggingface-cli"
   echo "✔  huggingface-cli already available"
@@ -109,22 +110,35 @@ elif command -v hf &>/dev/null; then
 else
   echo ""
   echo "── Step 2: Installing huggingface-hub CLI ──"
-  pip3 install -q huggingface-hub 2>/dev/null || pip install -q huggingface-hub 2>/dev/null || {
-    echo "⚠  Could not install huggingface-hub via pip."
-    echo "   Install manually:  pip install huggingface-hub"
-    echo "   Then re-run."
-    exit 1
-  }
-  if command -v huggingface-cli &>/dev/null; then
-    HF_CMD="huggingface-cli"
-  elif command -v hf &>/dev/null; then
-    HF_CMD="hf"
+  # Try pip install — fall back to venv if system pip is blocked (DGX Spark)
+  if pip3 install -q huggingface-hub 2>/dev/null || pip install -q huggingface-hub 2>/dev/null; then
+    echo "✔  huggingface-hub installed via pip"
   else
-    echo "⚠  huggingface-hub installed but 'huggingface-cli' or 'hf' command not found."
-    echo "   Using Python module fallback."
-    HF_CMD="python3 -m huggingface_hub"
+    echo "   System pip blocked — trying venv..."
+    HF_VENV="${HOME}/.bonsai/venv-hf"
+    python3 -m venv "${HF_VENV}" 2>/dev/null
+    "${HF_VENV}/bin/pip" install -q huggingface-hub 2>/dev/null
+    if [[ -f "${HF_VENV}/bin/huggingface-cli" ]]; then
+      HF_CMD="${HF_VENV}/bin/huggingface-cli"
+      echo "✔  huggingface-hub installed in venv at ${HF_VENV}"
+    else
+      echo "⚠  Could not install huggingface-hub. Install manually:"
+      echo "   python3 -m venv ~/.bonsai/venv-hf"
+      echo "   ~/.bonsai/venv-hf/bin/pip install huggingface-hub"
+      exit 1
+    fi
   fi
-  echo "✔  huggingface-hub installed (via ${HF_CMD})"
+  # Detect command after install
+  if [[ -z "${HF_CMD}" ]]; then
+    if command -v huggingface-cli &>/dev/null; then
+      HF_CMD="huggingface-cli"
+    elif command -v hf &>/dev/null; then
+      HF_CMD="hf"
+    else
+      echo "⚠  huggingface-hub CLI not in PATH after install."
+      HF_CMD="python3 -m huggingface_hub.huggingface_cli"
+    fi
+  fi
 fi
 
 # ─── Step 3: Build or update llama.cpp (PrismML fork) �───────────────
@@ -171,14 +185,33 @@ fi
 
 # ─── Step 4: Download model ──────────────────────────────────────────
 echo ""
-echo "── Step 4: Downloading model weights �─"
+echo "── Step 4: Downloading model weights ──"
 mkdir -p "${MODELS_DIR}/${KEY}"
 
 MODEL_PATH="${MODELS_DIR}/${KEY}/${MODEL_FILE}"
+
+# Smart cache: check common local paths before downloading
 if [[ -f "${MODEL_PATH}" ]]; then
   echo "✔  Model already downloaded: $(du -h "${MODEL_PATH}" | cut -f1)"
 else
-  echo "   Downloading ${HF_REPO}/${MODEL_FILE} ..."
+  # Check common local model cache paths
+  for CACHE in \
+    "/mnt/ugreen/bonsai/models/${KEY}/${MODEL_FILE}" \
+    "/mnt/ugreen/bonsai/models/$( [[ $KEY == 'ternary' ]] && echo 'ternary' || echo '1bit' )/${MODEL_FILE}" \
+    "${HOME}/models/${MODEL_FILE}" \
+    "${HOME}/.cache/huggingface/${MODEL_FILE}"
+  do
+    if [[ -f "$CACHE" ]]; then
+      echo "✔  Found cached model at $CACHE — symlinking..."
+      ln -sf "$CACHE" "${MODEL_PATH}"
+      break
+    fi
+  done
+fi
+
+# Download if still not present
+if [[ ! -f "${MODEL_PATH}" ]]; then
+  echo "   Downloading ${HF_REPO}/${MODEL_FILE} from HuggingFace ..."
   echo "   (This may take a while — file is $( [[ $KEY == "ternary" ]] && echo "~7.2 GB" || echo "~3.9 GB"))"
   ${HF_CMD} download "${HF_REPO}" "${MODEL_FILE}" --local-dir "${MODELS_DIR}/${KEY}" 2>&1
   echo "✔  Downloaded: ${MODEL_PATH}"
@@ -192,7 +225,20 @@ if $DSPARK; then
   if [[ -f "${DSPARK_MODEL_PATH}" ]]; then
     echo "✔  Drafter already downloaded: $(du -h "${DSPARK_MODEL_PATH}" | cut -f1)"
   else
-    echo "   Downloading drafter ${HF_REPO}/${DSPARK_FILE} ..."
+    # Check local cache paths for drafter
+    for CACHE in \
+      "/mnt/ugreen/bonsai/models/${KEY}/${DSPARK_FILE}" \
+      "${HOME}/models/${DSPARK_FILE}"
+    do
+      if [[ -f "$CACHE" ]]; then
+        echo "✔  Found cached drafter at $CACHE — symlinking..."
+        ln -sf "$CACHE" "${DSPARK_MODEL_PATH}"
+        break
+      fi
+    done
+  fi
+  if [[ ! -f "${DSPARK_MODEL_PATH}" ]]; then
+    echo "   Downloading drafter ${HF_REPO}/${DSPARK_FILE} from HuggingFace ..."
     ${HF_CMD} download "${HF_REPO}" "${DSPARK_FILE}" --local-dir "${MODELS_DIR}/${KEY}" 2>&1
     echo "✔  Drafter downloaded"
   fi
