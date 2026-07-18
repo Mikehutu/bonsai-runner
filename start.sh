@@ -196,10 +196,10 @@ if [[ -f "${MODEL_PATH}" ]]; then
 else
   # Check common local model cache paths
   for CACHE in \
-    "/mnt/ugreen/bonsai/models/${KEY}/${MODEL_FILE}" \
-    "/mnt/ugreen/bonsai/models/$( [[ $KEY == 'ternary' ]] && echo 'ternary' || echo '1bit' )/${MODEL_FILE}" \
+    "${MODELS_DIR}/${MODEL_FILE}" \
+    "${HOME}/.cache/huggingface/hub/${MODEL_FILE}" \
     "${HOME}/models/${MODEL_FILE}" \
-    "${HOME}/.cache/huggingface/${MODEL_FILE}"
+    "./models/${MODEL_FILE}"
   do
     if [[ -f "$CACHE" ]]; then
       echo "✔  Found cached model at $CACHE — symlinking..."
@@ -227,7 +227,8 @@ if $DSPARK; then
   else
     # Check local cache paths for drafter
     for CACHE in \
-      "/mnt/ugreen/bonsai/models/${KEY}/${DSPARK_FILE}" \
+      "${MODELS_DIR}/${DSPARK_FILE}" \
+      "${HOME}/.cache/huggingface/hub/${DSPARK_FILE}" \
       "${HOME}/models/${DSPARK_FILE}"
     do
       if [[ -f "$CACHE" ]]; then

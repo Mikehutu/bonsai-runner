@@ -95,7 +95,7 @@ Both ship with optional DSpark speculative‑decoding drafters for ~1.35× CUDA 
 | **Q1_0** | **81/100** | **85 Quality** | 5.1 s/turn, 44 t/s |
 | **Ternary + DSpark** | **77** | **85 Quality** | 16.2 s/turn (batch: 1.49× throughput) |
 
-Hardware: NVIDIA GB10 (128 GB unified VRAM). Full report at [ai-reports/bonsai-27b-benchmarks](https://mikehutu.github.io/ai-reports/bonsai-27b-benchmarks/).
+Hardware: NVIDIA GB10 (128 GB unified VRAM). Full report at [Bonsai 27B Benchmarks](https://mikehutu.github.io/AI-reports/bonsai-27b-benchmarks/).
 
 ---
 
