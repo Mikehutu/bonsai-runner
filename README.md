@@ -4,8 +4,8 @@ Run a 27B‑class LLM locally with **one command**.
 
 | Variant | Footprint | Quality | Hardware |
 |---|---|---|---|
-| **1-bit** (Q1_0) | **3.9 GB** | 89.5% of FP16 | Any GPU with ≥6 GB VRAM |
-| **Ternary** (Q2_0) | **7.2 GB** | 94.6% of FP16 | Any GPU with ≥10 GB VRAM |
+| **1-bit** (Q1_0) | **3.9 GB** | 89.5% of FP16 | CPU, or any GPU with ≥6 GB VRAM |
+| **Ternary** (Q2_0) | **7.2 GB** | 94.6% of FP16 | CPU, or any GPU with ≥10 GB VRAM |
 | **1-bit + DSpark** | 5.7 GB | Lossless speedup | CUDA GPU (speculative decoding) |
 | **Ternary + DSpark** | 9.1 GB | Lossless speedup | CUDA GPU (speculative decoding) |
 
@@ -32,7 +32,7 @@ The script will:
 
 1. ✅ Check prerequisites (cmake, make, python3)
 2. ✅ Install `huggingface-hub` for model downloads
-3. ✅ Clone and build the PrismML llama.cpp fork with CUDA/Metal support
+3. ✅ Clone and build the PrismML llama.cpp fork with CUDA/Metal/CPU support
 4. ✅ Download your chosen model from HuggingFace (one‑time)
 5. ✅ Start an OpenAI‑compatible server on `http://0.0.0.0:8080`
 
@@ -53,9 +53,9 @@ brew install cmake
 
 | Env var | Default | Description |
 |---|---|---|
-| `PORT` | `8080` | Server port |
+| `PORT` | `8080` | Server port (auto‑fallbacks to 8081, 8082 if busy) |
 | `HOST` | `0.0.0.0` | Bind address |
-| `NGL` | `99` | GPU layers (Metal/CUDA) |
+| `NGL` | `99` | GPU layers (Metal/CUDA — ignored on CPU) |
 
 Example:
 
@@ -99,7 +99,24 @@ Hardware: NVIDIA GB10 (128 GB unified VRAM). Full report at [Bonsai 27B Benchm
 
 ---
 
-## Why Bonsai?
+## CPU‑only Performance (Minisforum AI X1 Pro / WSL)
+
+The 1‑bit (Q1_0) variant runs on **CPU‑only hardware** with no GPU at all:
+
+| Metric | Value |
+|---|---|
+| **Hardware** | Minisforum AI X1 Pro (WSL2, 48 GB DDR5, AMD Ryzen AI 9 HX 370, 24 cores) |
+| **Model** | Bonsai‑27B‑Q1_0 (3.6 GB GGUF) |
+| **Backend** | llama.cpp CPU (no GPU — `-ngl` ignored) |
+| **Prompt ingest** | ~12.7 tok/s |
+| **Generation** | ~9.0 tok/s |
+| **Context** | 262K tokens |
+| **RAM use** | ~4 GB model + ~1 GB runtime overhead |
+| **Startup** | Build ~5 min (first time), then instant |
+
+> CPU inference at ~9 tok/s is usable for testing, light chat, and quick code queries. For interactive use, any GPU (even an iGPU) or the DGX Spark machines will give dramatically better throughput.
+
+---
 
 Bonsai 27B is a Qwen3.6‑27B derivative with **hybrid attention** (~75% linear / ~25% full) and **aggressive low‑bit quantization** designed from the ground up for local deployment:
 

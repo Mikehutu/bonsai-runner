@@ -246,11 +246,32 @@ if $DSPARK; then
   DSPARK_SERVER_ARGS="-md ${DSPARK_MODEL_PATH} ${DSPARK_ARGS}"
 fi
 
+# ─── Port fallback (try PORT, PORT+1, PORT+2) ─────────────────────────
+FINAL_PORT="${PORT}"
+if command -v ss &>/dev/null; then
+  for try_port in "${PORT}" $((PORT + 1)) $((PORT + 2)); do
+    if ! ss -tlnp 2>/dev/null | grep -qE "[: ]${try_port}\b"; then
+      FINAL_PORT="${try_port}"
+      break
+    fi
+  done
+elif command -v lsof &>/dev/null; then
+  for try_port in "${PORT}" $((PORT + 1)) $((PORT + 2)); do
+    if ! lsof -i :"${try_port}" &>/dev/null; then
+      FINAL_PORT="${try_port}"
+      break
+    fi
+  done
+fi
+if [[ "${FINAL_PORT}" != "${PORT}" ]]; then
+  echo "   Port ${PORT} busy → using port ${FINAL_PORT}"
+fi
+
 # ─── Step 5: Start server ────────────────────────────────────────────
 echo ""
 echo "── Step 5: Starting llama-server ──"
 echo "   Model:     ${MODEL_PATH}"
-echo "   Endpoint:  http://${HOST}:${PORT}"
+echo "   Endpoint:  http://${HOST}:${FINAL_PORT}"
 echo "   GPU layers: ${NGL}"
 echo ""
 echo "   Press Ctrl+C to stop."
@@ -260,7 +281,7 @@ exec "${SERVER_BIN}" \
   -m "${MODEL_PATH}" \
   ${DSPARK_SERVER_ARGS} \
   --host "${HOST}" \
-  --port "${PORT}" \
+  --port "${FINAL_PORT}" \
   -ngl "${NGL}" \
   -c 0 \
   --temp 0.7 \
