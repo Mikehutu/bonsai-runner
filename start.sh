@@ -9,7 +9,7 @@ set -euo pipefail
 
 # ─── Config ──────────────────────────────────────────────────────────
 MODEL_VARIANT="${1:-1bit}"
-LLAMA_CPP_REPO="https://github.com/prism-ml/llama.cpp"
+LLAMA_CPP_REPO="https://github.com/PrismML-Eng/llama.cpp"
 LLAMA_CPP_DIR="${HOME}/.bonsai/llama.cpp"
 MODELS_DIR="${HOME}/.bonsai/models"
 PORT="${PORT:-8080}"
@@ -152,7 +152,7 @@ if [[ -d "${LLAMA_CPP_DIR}" ]]; then
   (cd "${LLAMA_CPP_DIR}" && git pull --ff-only 2>/dev/null) || echo "   (could not update, using existing)"
 else
   echo "   Cloning PrismML fork..."
-  git clone --depth 1 "${LLAMA_CPP_REPO}" "${LLAMA_CPP_DIR}"
+  git clone --depth 1 -b prism "${LLAMA_CPP_REPO}" "${LLAMA_CPP_DIR}"
 fi
 
 BUILD_DIR="${LLAMA_CPP_DIR}/build"
