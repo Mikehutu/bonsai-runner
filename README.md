@@ -76,28 +76,30 @@ brew install cmake
 Why does Bonsai use ~19 GB VRAM in default server mode?
 In `llama-server`, memory consists of **Model Weights + Multi-Slot KV Cache + Prompt Cache**:
 1. **Model Weights**: ~3.9 GB (Q1_0) or ~7.2 GB (Q2_0) + ~1.8 GB for DSpark.
-2. **KV Cache & Slots**: `llama-server` defaults to 4 parallel slots (`NP=4`). Each slot allocates a KV cache buffer for concurrent conversations.
-3. **Prompt Cache & Graphs**: Up to 8 GB host RAM reserved for context caching and CUDA compute graphs.
+2. **Multi-Slot KV Cache**: `llama-server` defaults to 4 parallel slots (`NP=4`). Each slot allocates a KV cache buffer for concurrent conversations.
+3. **Grouped-Query Attention (GQA)**: Bonsai's GQA architecture is extremely efficient—each token of KV cache requires only **~64 KB** VRAM!
 
-### Recommended Settings by Hardware Tier
+### 💡 High-Context Single-User Mode (`NP=1`)
+In single-user mode (`NP=1`), you can scale context to **32,768 (32K)** or **65,536 (65K)** even on 12GB – 24GB GPUs:
 
-| Hardware / VRAM Tier | Recommended Command | Peak Memory | Notes |
-|---|---|---|---|
-| **12 GB VRAM / RAM**<br>*(RTX 3060/4060 12GB, 16GB Macs)* | `NP=1 CTX_SIZE=4096 CACHE_RAM=0 bash start.sh 1bit` | **~5.2 GB** | Fits comfortably on 12 GB GPUs. |
-| **16 GB – 24 GB VRAM**<br>*(RTX 3090/4090 24GB, Apple M-series)* | `NP=1 CTX_SIZE=8192 bash start.sh ternary+dspark` | **~10.5 GB** | Single-user workhorse setup with DSpark speedup. |
-| **32 GB – 48 GB RAM**<br>*(CPU-Only Workstation / Minisforum)* | `NGL=0 NP=1 CTX_SIZE=8192 bash start.sh 1bit` | **~5.5 GB** | Pure CPU mode (`NGL=0`). ~9.0 tok/s generation. |
-| **64 GB – 128 GB VRAM**<br>*(NVIDIA GB10 / DGX Spark / Server)* | `NP=4 CTX_SIZE=16384 bash start.sh ternary+dspark` | **~19.0 GB** | Full multi-user concurrent server mode. |
+| Hardware / VRAM Tier | Usage Mode | Recommended Command | Active Context | Peak VRAM |
+|---|---|---|---|---|
+| **12 GB VRAM**<br>*(RTX 3060/4060 12GB, 16GB Macs)* | **High Context** | `NP=1 CTX_SIZE=32768 CACHE_RAM=0 bash start.sh 1bit` | **32,768 (32K)** | **~7.2 GB** |
+| **16 GB – 24 GB VRAM**<br>*(RTX 3090/4090 24GB, Apple M-series)* | **High Context + Speed** | `NP=1 CTX_SIZE=32768 bash start.sh ternary+dspark` | **32,768 (32K)** | **~12.5 GB** |
+| **16 GB – 24 GB VRAM**<br>*(RTX 3090/4090 24GB, Apple M-series)* | **Ultra Context** | `NP=1 CTX_SIZE=65536 bash start.sh ternary` | **65,536 (65K)** | **~14.5 GB** |
+| **32 GB – 48 GB RAM**<br>*(CPU-Only Workstation / Minisforum)* | **CPU Mode** | `NGL=0 NP=1 CTX_SIZE=16384 bash start.sh 1bit` | **16,384 (16K)** | **~6.0 GB** |
+| **64 GB – 128 GB VRAM**<br>*(NVIDIA GB10 / DGX Spark)* | **4-Slot Server** | `NP=4 CTX_SIZE=16384 bash start.sh ternary+dspark` | **16K × 4 Slots** | **~19.0 GB** |
 
-Example for 12GB GPU:
+Example for 32K context on a 12GB GPU:
 
 ```bash
-NP=1 CTX_SIZE=4096 CACHE_RAM=0 bash start.sh 1bit
+NP=1 CTX_SIZE=32768 CACHE_RAM=0 bash start.sh 1bit
 ```
 
-Example for CPU-only (no GPU):
+Example for 65K context on a 24GB GPU:
 
 ```bash
-NGL=0 NP=1 CTX_SIZE=8192 bash start.sh 1bit
+NP=1 CTX_SIZE=65536 bash start.sh ternary
 ```
 
 ---
