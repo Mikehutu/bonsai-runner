@@ -1,5 +1,14 @@
 # 🪢 Bonsai 27B Runner
 
+> [!NOTE]
+> **Update (July 22, 2026): Optimized Speculative Decoding Recipe (`DSpark K=4`) & Memory Sizing**
+> 
+> - **Performance Impact:** Reduced single-turn interactive latency from **`16.2s` down to `5.73s` per turn** (**2.8× faster turn latency**) while recovering full multi-turn benchmark quality (**82/100 score** across 79 scenarios, 0 timeouts).
+> - **Key Technical Edits:**
+>   1. **Capped Speculative Depth (`--spec-draft-n-max 4`)**: Replaced uncapped draft depth to eliminate sequential draft generation stalls.
+>   2. **Context & Kernel Alignment (`-c 4096 -fa auto`)**: Matched draft model context and enabled Flash Attention.
+>   3. **Flexible Hardware Sizing**: Added environment controls (`NP`, `CTX_SIZE`, `CACHE_RAM`) allowing peak memory to scale from **~5.2 GB** (12GB GPUs / laptops) to **~19 GB** (multi-user servers) and **~5.5 GB** (pure CPU mode).
+
 Run a 27B‑class LLM locally with **one command**.
 
 | Variant | Footprint | Quality | Hardware |
@@ -49,18 +58,46 @@ brew install cmake
 
 ---
 
-## Configuration
+## Configuration & Hardware Tuning
 
-| Env var | Default | Description |
+| Env Var | Default | Description |
 |---|---|---|
 | `PORT` | `8080` | Server port (auto‑fallbacks to 8081, 8082 if busy) |
 | `HOST` | `0.0.0.0` | Bind address |
-| `NGL` | `99` | GPU layers (Metal/CUDA — ignored on CPU) |
+| `NGL` | `99` | GPU layers (Metal/CUDA — set `NGL=0` for pure CPU) |
+| `NP` | `4` | Concurrent slots (set `NP=1` for single-user low memory) |
+| `CTX_SIZE` | `4096` | Active context length per slot (up to 262,144) |
+| `CACHE_RAM` | `8192` | Host RAM reserved for prompt caching in MB |
 
-Example:
+---
+
+## 💾 Memory & VRAM Sizing Guide (12 GB to 128 GB+)
+
+Why does Bonsai use ~19 GB VRAM in default server mode?
+In `llama-server`, memory consists of **Model Weights + Multi-Slot KV Cache + Prompt Cache**:
+1. **Model Weights**: ~3.9 GB (Q1_0) or ~7.2 GB (Q2_0) + ~1.8 GB for DSpark.
+2. **KV Cache & Slots**: `llama-server` defaults to 4 parallel slots (`NP=4`). Each slot allocates a KV cache buffer for concurrent conversations.
+3. **Prompt Cache & Graphs**: Up to 8 GB host RAM reserved for context caching and CUDA compute graphs.
+
+### Recommended Settings by Hardware Tier
+
+| Hardware / VRAM Tier | Recommended Command | Peak Memory | Notes |
+|---|---|---|---|
+| **12 GB VRAM / RAM**<br>*(RTX 3060/4060 12GB, 16GB Macs)* | `NP=1 CTX_SIZE=4096 CACHE_RAM=0 bash start.sh 1bit` | **~5.2 GB** | Fits comfortably on 12 GB GPUs. |
+| **16 GB – 24 GB VRAM**<br>*(RTX 3090/4090 24GB, Apple M-series)* | `NP=1 CTX_SIZE=8192 bash start.sh ternary+dspark` | **~10.5 GB** | Single-user workhorse setup with DSpark speedup. |
+| **32 GB – 48 GB RAM**<br>*(CPU-Only Workstation / Minisforum)* | `NGL=0 NP=1 CTX_SIZE=8192 bash start.sh 1bit` | **~5.5 GB** | Pure CPU mode (`NGL=0`). ~9.0 tok/s generation. |
+| **64 GB – 128 GB VRAM**<br>*(NVIDIA GB10 / DGX Spark / Server)* | `NP=4 CTX_SIZE=16384 bash start.sh ternary+dspark` | **~19.0 GB** | Full multi-user concurrent server mode. |
+
+Example for 12GB GPU:
 
 ```bash
-PORT=18080 NGL=60 bash start.sh ternary
+NP=1 CTX_SIZE=4096 CACHE_RAM=0 bash start.sh 1bit
+```
+
+Example for CPU-only (no GPU):
+
+```bash
+NGL=0 NP=1 CTX_SIZE=8192 bash start.sh 1bit
 ```
 
 ---

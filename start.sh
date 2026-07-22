@@ -8,18 +8,32 @@
 set -euo pipefail
 
 # ─── Config ──────────────────────────────────────────────────────────
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+if [[ -f "${SCRIPT_DIR}/.env" ]]; then
+  echo "✔  Loading environment variables from .env"
+  set -a
+  source "${SCRIPT_DIR}/.env"
+  set +a
+fi
+
 MODEL_VARIANT="${1:-1bit}"
 LLAMA_CPP_REPO="https://github.com/PrismML-Eng/llama.cpp"
-LLAMA_CPP_DIR="${HOME}/.bonsai/llama.cpp"
-MODELS_DIR="${HOME}/.bonsai/models"
+LLAMA_CPP_DIR="${LLAMA_CPP_DIR:-${HOME}/.bonsai/llama.cpp}"
+MODELS_DIR="${MODELS_DIR:-${HOME}/.bonsai/models}"
 PORT="${PORT:-8080}"
 HOST="${HOST:-0.0.0.0}"
-NGL="${NGL:-99}"     # GPU layers (Metal/CUDA)
+NGL="${NGL:-99}"            # GPU layers (Metal/CUDA — set NGL=0 for pure CPU)
+NP="${NP:-4}"              # Parallel slots (set NP=1 for single-user low memory)
+CTX_SIZE="${CTX_SIZE:-4096}" # Context size (up to 262144)
+CACHE_RAM="${CACHE_RAM:-8192}" # Host RAM for prompt cache in MB
+TEMPERATURE="${TEMPERATURE:-0.7}"
+TOP_P="${TOP_P:-0.95}"
+TOP_K="${TOP_K:-40}"
 
 # Model definitions:  HF_REPO  MODEL_FILE  DSPARK_FILE  DSPARK_FLAG
 declare -A MODELS
-MODELS[1bit]="prism-ml/Bonsai-27B-gguf  Bonsai-27B-Q1_0.gguf  Bonsai-27B-dspark-Q4_1.gguf  --spec-type draft-dspark --spec-draft-n-max 4"
-MODELS[ternary]="prism-ml/Ternary-Bonsai-27B-gguf  Ternary-Bonsai-27B-Q2_0.gguf  Ternary-Bonsai-27B-dspark-Q4_1.gguf  --spec-type draft-dspark --spec-draft-n-max 4"
+MODELS[1bit]="prism-ml/Bonsai-27B-gguf  Bonsai-27B-Q1_0.gguf  Bonsai-27B-dspark-Q4_1.gguf  --spec-draft-n-max 4"
+MODELS[ternary]="prism-ml/Ternary-Bonsai-27B-gguf  Ternary-Bonsai-27B-Q2_0.gguf  Ternary-Bonsai-27B-dspark-Q4_1.gguf  --spec-draft-n-max 4"
 
 # ─── Help ─────────────────────────────────────────────────────────────
 if [[ "${MODEL_VARIANT}" == "-h" || "${MODEL_VARIANT}" == "--help" ]]; then
@@ -62,6 +76,11 @@ echo "════════════════════════�
 
 # ─── Step 1: Check prerequisites ─────────────────────────────────────
 PREREQ_FAIL=false
+
+if ! command -v git &>/dev/null; then
+  echo "⚠  git not found. Install:  sudo apt install git  (or brew install git)"
+  PREREQ_FAIL=true
+fi
 
 if ! command -v cmake &>/dev/null; then
   echo "⚠  cmake not found. Install:  sudo apt install cmake build-essential  (or brew install cmake)"
@@ -165,16 +184,19 @@ elif [[ "${BACKEND}" == "Metal" ]]; then
   echo "   Metal build enabled"
 fi
 
-mkdir -p "${BUILD_DIR}"
-(cd "${BUILD_DIR}" && cmake .. ${CMAKE_FLAGS} -DCMAKE_BUILD_TYPE=Release 2>&1 | tail -3)
-cmake --build "${BUILD_DIR}" --config Release -j "$(nproc)" 2>&1 | tail -5
-echo "✔  llama.cpp built"
-echo "   Binaries: ${BUILD_DIR}/bin/"
-
 SERVER_BIN="${BUILD_DIR}/bin/llama-server"
 if [[ ! -x "${SERVER_BIN}" ]]; then
-  # Try alternate location
   SERVER_BIN="${BUILD_DIR}/examples/server/llama-server"
+fi
+
+if [[ -x "${SERVER_BIN}" ]]; then
+  echo "✔  llama.cpp already built at ${SERVER_BIN}"
+else
+  echo "   Building llama.cpp..."
+  mkdir -p "${BUILD_DIR}"
+  (cd "${BUILD_DIR}" && cmake .. ${CMAKE_FLAGS} -DCMAKE_BUILD_TYPE=Release 2>&1 | tail -3)
+  cmake --build "${BUILD_DIR}" --config Release -j "$(nproc)" 2>&1 | tail -5
+  echo "✔  llama.cpp built"
 fi
 if [[ ! -x "${SERVER_BIN}" ]]; then
   echo "❌  Could not find llama-server binary after build."
@@ -277,13 +299,19 @@ echo ""
 echo "   Press Ctrl+C to stop."
 echo ""
 
+# Ensure LD_LIBRARY_PATH points to built shared libraries
+export LD_LIBRARY_PATH="${BUILD_DIR}/bin:${LD_LIBRARY_PATH:-}"
+
 exec "${SERVER_BIN}" \
   -m "${MODEL_PATH}" \
   ${DSPARK_SERVER_ARGS} \
   --host "${HOST}" \
   --port "${FINAL_PORT}" \
   -ngl "${NGL}" \
-  -c 0 \
-  --temp 0.7 \
-  --top-p 0.95 \
-  --top-k 40
+  -np "${NP}" \
+  -fa auto \
+  -c "${CTX_SIZE}" \
+  --cache-ram "${CACHE_RAM}" \
+  --temp "${TEMPERATURE}" \
+  --top-p "${TOP_P}" \
+  --top-k "${TOP_K}"
