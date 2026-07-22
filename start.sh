@@ -23,7 +23,7 @@ MODELS_DIR="${MODELS_DIR:-${HOME}/.bonsai/models}"
 PORT="${PORT:-8080}"
 HOST="${HOST:-0.0.0.0}"
 NGL="${NGL:-99}"            # GPU layers (Metal/CUDA — set NGL=0 for pure CPU)
-NP="${NP:-4}"              # Parallel slots (set NP=1 for single-user low memory)
+NP="${NP:-1}"              # Parallel slots (default: 1 for single-user, set NP=4 for multi-user server)
 CTX_SIZE="${CTX_SIZE:-4096}" # Context size (up to 262144)
 CACHE_RAM="${CACHE_RAM:-8192}" # Host RAM for prompt cache in MB
 TEMPERATURE="${TEMPERATURE:-0.7}"
