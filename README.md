@@ -199,3 +199,21 @@ bonsai-runner/
 ```
 
 Models and the llama.cpp build are cached under `~/.bonsai/` — re‑running is instant after the first download.
+
+---
+
+## Platform Support
+
+`start.sh` auto-detects your hardware with a single script across all platforms:
+
+| Platform | Detection | Backend | RAM source |
+|---|---|---|---|
+| **Linux** (any distro) | `uname` → `"Linux"` | CPU (or CUDA if GPU found) | `/proc/meminfo` |
+| **macOS Apple Silicon** (M1–M5) | `uname -m` → `"arm64"` | **Metal** (GPU accelerated) | `sysctl hw.memsize` |
+| **macOS Intel** | `uname -m` → `"x86_64"` | CPU | `sysctl hw.memsize` |
+| **WSL2** (Windows) | `uname` → `"Linux"` | CPU (sees Windows CUDA drivers but ignores them) | `/proc/meminfo` |
+
+**Notes:**
+- **CUDA on Linux:** detected via `nvidia-smi`. If the tool exists but reports no GPU (WSL host drivers), falls back to CPU.
+- **Metal on Mac:** uses the PrismML llama.cpp fork with `-DGGML_METAL=ON`. Only Apple Silicon (arm64) gets Metal; Intel Macs use CPU.
+- **No Mac to test?** The detection logic uses standard POSIX commands (`uname`, `sysctl`) that behave identically across macOS versions. The build flags (`-DGGML_METAL=ON`) come from the upstream PrismML fork. If you hit issues on macOS, [open an issue](https://github.com/Mikehutu/bonsai-runner/issues) — the `uname`/`sysctl` paths are well-tested, but Metal compile issues are upstream.

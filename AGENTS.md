@@ -49,8 +49,9 @@ bonsai-runner/
 
 4. **Port fallback.** If the default port (8080) is busy, try 8081, then 8082.
 
-5. **Backend detection.** `start.sh` auto-detects CUDA (nvidia-smi) and Metal
-   (Apple Silicon). CPU is the default fallback.
+5. **Backend detection.** `start.sh` auto-detects CUDA (`nvidia-smi`), Metal
+   (Apple Silicon arm64), and CPU. **One script, all platforms.** See the
+   Platform Support section in the README for details.
 
 ## Variant System
 
