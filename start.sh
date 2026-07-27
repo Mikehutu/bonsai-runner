@@ -83,10 +83,14 @@ fi
 # Check for CUDA or Metal
 BACKEND="CPU"
 if command -v nvidia-smi &>/dev/null; then
-  BACKEND="CUDA"
-  echo "✔  CUDA GPU detected"
-elif [[ "$(uname)" == "Darwin" ]] && command -v metal &>/dev/null 2>&1 || true; then
-  # macOS with Apple Silicon likely has Metal
+  # Verify there's actually a usable GPU (not just Windows CUDA drivers visible from WSL)
+  if nvidia-smi --query-gpu=name --format=csv,noheader 2>/dev/null | head -1 | grep -q . 2>/dev/null; then
+    BACKEND="CUDA"
+    echo "✔  CUDA GPU detected"
+  else
+    echo "   nvidia-smi found but no GPU reported (WSL sees Windows drivers only)"
+  fi
+elif [[ "$(uname)" == "Darwin" ]]; then
   if [[ "$(uname -m)" == "arm64" ]]; then
     BACKEND="Metal"
     echo "✔  Apple Silicon (Metal) detected"
@@ -101,16 +105,22 @@ if [[ "${1:-}" == "" ]]; then
   TOTAL_VRAM_MB=0
   TOTAL_RAM_MB=0
 
-  # Get total system RAM
-  if [[ "$(uname)" == "Linux" ]]; then
-    TOTAL_RAM_MB=$(grep MemTotal /proc/meminfo 2>/dev/null | awk '{print int($2/1024)}')
-  elif [[ "$(uname)" == "Darwin" ]]; then
-    TOTAL_RAM_MB=$(sysctl -n hw.memsize 2>/dev/null | awk '{print int($1/1048576)}')
+  # Get total system RAM (errors suppressed for set -e strict mode)
+  OS_NAME="$(uname 2>/dev/null)" || true
+  if [[ "${OS_NAME}" == "Linux" ]]; then
+    TOTAL_RAM_MB=$(grep MemTotal /proc/meminfo 2>/dev/null | awk '{print int($2/1024)}' 2>/dev/null || echo 0)
+  elif [[ "${OS_NAME}" == "Darwin" ]]; then
+    TOTAL_RAM_MB=$(sysctl -n hw.memsize 2>/dev/null | awk '{print int($1/1048576)}' 2>/dev/null || echo 0)
   fi
 
-  # Get GPU VRAM if CUDA
+  # Get GPU VRAM if CUDA (errors suppressed for set -e strict mode)
   if [[ "${BACKEND}" == "CUDA" ]]; then
-    TOTAL_VRAM_MB=$(nvidia-smi --query-gpu=memory.total --format=csv=noheader,nounits 2>/dev/null | head -1 | tr -d ' ')
+    TOTAL_VRAM_MB=$(nvidia-smi --query-gpu=memory.total --format=csv,noheader 2>/dev/null | head -1 | tr -d ' ' 2>/dev/null || echo 0)
+    if [[ -z "${TOTAL_VRAM_MB}" ]] || ! [[ "${TOTAL_VRAM_MB}" -gt 0 ]] 2>/dev/null; then
+      TOTAL_VRAM_MB=0
+      BACKEND="CPU"
+      echo "   (GPU not usable — falling back to CPU)"
+    fi
   fi
 
   echo ""
