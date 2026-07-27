@@ -53,6 +53,7 @@ echo ""
 echo "═══ 4. File structure �══"
 [[ -f "$CD/start.sh"    ]] && pass "start.sh exists"  || fail "start.sh missing"
 [[ -f "$CD/README.md"   ]] && pass "README.md exists" || fail "README.md missing"
+[[ -f "$CD/AGENTS.md"   ]] && pass "AGENTS.md exists" || fail "AGENTS.md missing"
 [[ -x "$CD/start.sh"    ]] && pass "start.sh executable" || fail "start.sh not executable"
 
 # ─── 5. Script invariants ──────────────────────────────────
@@ -68,6 +69,8 @@ check "git clone"       "$S" "clones PrismML fork"
 check "set -euo pipefail" "$S" "strict mode enabled"
 check "exec "           "$S" "uses exec to start server (clean process)"
 check "Ctrl+C"          "$S" "tells user how to stop"
+check "Configuring"     "$S" "cmake configure step has feedback"
+check "Cleaning and retrying" "$S" "stale build dir recovery"
 
 # ─── 6. Dry-run flow (prereq detection) ─────────────────────
 echo ""
