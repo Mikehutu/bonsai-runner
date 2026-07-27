@@ -166,7 +166,14 @@ elif [[ "${BACKEND}" == "Metal" ]]; then
 fi
 
 mkdir -p "${BUILD_DIR}"
-(cd "${BUILD_DIR}" && cmake .. ${CMAKE_FLAGS} -DCMAKE_BUILD_TYPE=Release 2>&1 | tail -3)
+echo "   Configuring..."
+if ! (cd "${BUILD_DIR}" && cmake .. ${CMAKE_FLAGS} -DCMAKE_BUILD_TYPE=Release 2>&1 | tail -3); then
+  echo "   CMake configure failed — stale build dir after git pull. Cleaning and retrying..."
+  rm -rf "${BUILD_DIR}"
+  mkdir -p "${BUILD_DIR}"
+  (cd "${BUILD_DIR}" && cmake .. ${CMAKE_FLAGS} -DCMAKE_BUILD_TYPE=Release 2>&1 | tail -3)
+fi
+echo "   Building..."
 cmake --build "${BUILD_DIR}" --config Release -j "$(nproc)" 2>&1 | tail -5
 echo "✔  llama.cpp built"
 echo "   Binaries: ${BUILD_DIR}/bin/"
