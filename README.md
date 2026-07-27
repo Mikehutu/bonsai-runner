@@ -93,9 +93,30 @@ curl http://localhost:8080/v1/chat/completions \
   -d '{"model":"bonsai","messages":[{"role":"user","content":[{"type":"text","text":"What is in this image?"},{"type":"image_url","image_url":{"url":"data:image/png;base64,<BASE64_DATA>"}}]}],"stream":true}'
 ```
 
-The projector adds ~0.6 GB to the model footprint. Images are downscaled to
-1024 vision tokens by default for speed; override with `--image-max-tokens`
-or set `IMAGE_MAX_TOKENS=0` to disable capping for OCR-style tasks.
+**Vision settings:**
+
+| Setting | Default | Description |
+|---|---|---|
+| mmproj file | `*mmproj-Q8_0.gguf` | Multimodal projector (vision tower), ~0.6 GB |
+| `--image-max-tokens` | `1024` | Downscales images to 1024 vision tokens for speed |
+| `--image-min-tokens` | model default | Minimum vision tokens (typically 256) |
+
+**Image token pricing:**
+- Each image is encoded into vision tokens (one token per ~32×32 pixel patch)
+- Bonsai-27B accepts up to ~4096 vision tokens (about a 4.2 MP image)
+- `--image-max-tokens 1024` is the sweet spot for everyday photos and screenshots
+- For OCR-style tasks (small text, serial numbers), use `IMAGE_MAX_TOKENS=0` to disable capping
+
+**Performance impact:**
+- The mmproj file adds ~0.6 GB to the model footprint (Q8_0) or ~0.9 GB (BF16)
+- Vision tokens are prefill — a large photo adds thousands of tokens before the first word
+- The prompt cache means follow-up questions about the same image are near-instant
+- On CPU, expect ~16 t/s prompt processing and ~9 t/s generation with images
+
+**Concurrency:** llama-server auto-detects `n_parallel` based on CPU cores.
+On a 24-thread machine, it defaults to 4. To override, add `--parallel N`
+to the `exec` line in `start.sh`. Each slot gets its own KV cache, so memory
+scales linearly. For CPU-only, `--parallel 1` minimizes memory pressure.
 
 ### OpenAI‑compatible API
 

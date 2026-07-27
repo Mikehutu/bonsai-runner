@@ -77,6 +77,80 @@ unaffected.
 3. Add a help text line
 4. Update the README variant table
 
+### Finding the mmproj file for a new model
+
+Bonsai-27B is a vision-language model. The mmproj file (multimodal projector)
+is what enables image input. To find the correct mmproj filename for a model
+variant, list the files in the HuggingFace repo:
+
+```bash
+python3 -c "
+from huggingface_hub import HfApi
+api = HfApi()
+files = api.list_repo_files('prism-ml/Bonsai-27B-gguf')
+for f in files:
+    if 'mmproj' in f:
+        print(f)
+"
+```
+
+This will output something like:
+```
+Bonsai-27B-mmproj-BF16.gguf
+Bonsai-27B-mmproj-Q8_0.gguf
+```
+
+Use the Q8_0 variant (smaller, faster) unless you need maximum precision.
+
+### Vision / Image Settings
+
+The `start.sh` script passes these flags to `llama-server` for vision support:
+
+| Flag | Value | Purpose |
+|---|---|---|
+| `-mm` | `<path-to-mmproj>` | Loads the multimodal projector (vision tower) |
+| `--image-max-tokens` | `1024` | Downscales images to 1024 vision tokens for speed |
+| `--image-min-tokens` | *(not set)* | Uses model default (typically 256) |
+
+**Image token pricing:**
+- Each image is encoded into vision tokens (one token per ~32×32 pixel patch)
+- Bonsai-27B accepts up to ~4096 vision tokens (about a 4.2 MP image)
+- `--image-max-tokens 1024` is the sweet spot for everyday photos and screenshots
+- For OCR-style tasks (small text, serial numbers), use `IMAGE_MAX_TOKENS=0` to disable capping
+
+**Performance impact:**
+- The mmproj file adds ~0.6 GB to the model footprint (Q8_0) or ~0.9 GB (BF16)
+- Vision tokens are prefill — a large photo adds thousands of tokens before the first word
+- The prompt cache means follow-up questions about the same image are near-instant
+- On CPU, expect ~16 t/s prompt processing and ~9 t/s generation with images
+
+### Concurrency (`n_parallel`)
+
+llama-server auto-detects `n_parallel` based on CPU cores. On a 24-thread
+machine, it defaults to 4 (n_cores / 2, capped). This means 4 concurrent
+requests can be processed.
+
+To override:
+```bash
+# Add to the exec line in start.sh:
+--parallel 1    # Lower memory, single request only
+--parallel 8    # More concurrency, more memory
+```
+
+Each parallel slot gets its own copy of the KV cache, so memory usage scales
+linearly with `n_parallel`. For CPU-only inference, `--parallel 1` is
+recommended to minimize memory pressure.
+
+### Model Variant Quick Reference
+
+| Variant | Model File | mmproj File | DSPark | Size | Quality |
+|---|---|---|---|---|---|
+| `1bit` | `Bonsai-27B-Q1_0.gguf` | `Bonsai-27B-mmproj-Q8_0.gguf` | optional | 3.9 GB | 89.5% FP16 |
+| `ternary` | `Ternary-Bonsai-27B-Q2_0.gguf` | `Ternary-Bonsai-27B-mmproj-Q8_0.gguf` | optional | 7.2 GB | 94.6% FP16 |
+
+Both variants share the same vision tower format (Q8_0 mmproj). The ternary
+variant has higher image quality due to better overall model precision.
+
 ## Testing
 
 Run the validation suite:
