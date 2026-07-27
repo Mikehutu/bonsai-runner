@@ -3,7 +3,7 @@
 Run a 27B‑class LLM locally with **one command**.
 
 | Variant | Footprint | Quality | Hardware |
-|---|---|---|---|
+| --- | --- | --- | --- |
 | **1-bit** (Q1_0) | **3.9 GB** | 89.5% of FP16 | CPU, or any GPU with ≥6 GB VRAM |
 | **Ternary** (Q2_0) | **7.2 GB** | 94.6% of FP16 | CPU, or any GPU with ≥10 GB VRAM |
 | **1-bit + DSpark** | 5.7 GB | Lossless speedup | CUDA GPU (speculative decoding) |
@@ -52,7 +52,7 @@ brew install cmake
 ## Configuration
 
 | Env var | Default | Description |
-|---|---|---|
+| --- | --- | --- |
 | `PORT` | `8080` | Server port (auto‑fallbacks to 8081, 8082 if busy) |
 | `HOST` | `0.0.0.0` | Bind address |
 | `NGL` | `99` | GPU layers (Metal/CUDA — ignored on CPU) |
@@ -67,7 +67,22 @@ PORT=18080 NGL=60 bash start.sh ternary
 
 ## What You Get
 
-An **OpenAI‑compatible API** endpoint at `http://localhost:8080/v1/chat/completions`. Works with any tool or library that speaks the OpenAI API:
+### Web UI
+
+After `start.sh` finishes, open **`http://localhost:8080`** in your browser.
+llama.cpp includes a built-in chat interface — no Docker, no extra setup.
+
+Features:
+- Chat with the model
+- Upload files (PDF, images, text, code)
+- Multi-turn conversation
+- Copy/paste responses
+
+### OpenAI‑compatible API
+
+The same endpoint also serves an OpenAI‑compatible API at
+`http://localhost:8080/v1/chat/completions`. Works with any tool or library
+that speaks the OpenAI API:
 
 ```bash
 curl http://localhost:8080/v1/chat/completions \
@@ -79,7 +94,7 @@ curl http://localhost:8080/v1/chat/completions \
 ## Models
 
 | Model | HF repo | Size | Notes |
-|---|---|---|---|
+| --- | --- | --- | --- |
 | **Bonsai-27B-Q1_0** | [`prism-ml/Bonsai-27B-gguf`](https://huggingface.co/prism-ml/Bonsai-27B-gguf) | 3.9 GB | 1-bit, 89.5% of FP16 |
 | **Ternary-Bonsai-27B-Q2_0** | [`prism-ml/Ternary-Bonsai-27B-gguf`](https://huggingface.co/prism-ml/Ternary-Bonsai-27B-gguf) | 7.2 GB | Ternary, 94.6% of FP16 |
 
@@ -90,7 +105,7 @@ Both ship with optional DSpark speculative‑decoding drafters for ~1.35× CUDA 
 ## Benchmark Results
 
 | Variant | Full Suite (79 scenarios) | Finnish (10 FI) | Speed |
-|---|---|---|---|---|
+|---|---|---|---|---||
 | **Ternary Q2_0** | **85/100** ⭐ | **90/100** | 5.7 s/turn, 30 t/s |
 | **Q1_0** | **81/100** | **85 Quality** | 5.1 s/turn, 44 t/s |
 | **Ternary + DSpark** | **77** | **85 Quality** | 16.2 s/turn (batch: 1.49× throughput) |
@@ -118,6 +133,8 @@ The 1‑bit (Q1_0) variant runs on **CPU‑only hardware** with no GPU at all:
 
 ---
 
+## Why Bonsai?
+
 Bonsai 27B is a Qwen3.6‑27B derivative with **hybrid attention** (~75% linear / ~25% full) and **aggressive low‑bit quantization** designed from the ground up for local deployment:
 
 - **262K token context** — full‑repo code analysis, long documents
@@ -132,7 +149,9 @@ Bonsai 27B is a Qwen3.6‑27B derivative with **hybrid attention** (~75% linear 
 ```
 bonsai-runner/
 ├── start.sh          # One‑click runner (this script)
-└── README.md         # You are here
+├── AGENTS.md         # Instructions for AI agents
+├── README.md         # You are here
+└── test-start.sh     # Validation script (not shipped to end users)
 ```
 
 Models and the llama.cpp build are cached under `~/.bonsai/` — re‑running is instant after the first download.
