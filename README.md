@@ -78,6 +78,25 @@ Features:
 - Multi-turn conversation
 - Copy/paste responses
 
+### Image Input (Vision)
+
+Bonsai-27B is a **vision-language model** — it accepts images alongside text.
+The `start.sh` script automatically downloads the multimodal projector
+(`mmproj`) file and passes it to `llama-server` via the `-mm` flag.
+
+**Web UI:** Click the `+` icon in the message box to upload a photo or screenshot.
+
+**OpenAI-compatible API:** Send `image_url` content parts to `/v1/chat/completions`:
+
+```bash
+curl http://localhost:8080/v1/chat/completions \
+  -d '{"model":"bonsai","messages":[{"role":"user","content":[{"type":"text","text":"What is in this image?"},{"type":"image_url","image_url":{"url":"data:image/png;base64,<BASE64_DATA>"}}]}],"stream":true}'
+```
+
+The projector adds ~0.6 GB to the model footprint. Images are downscaled to
+1024 vision tokens by default for speed; override with `--image-max-tokens`
+or set `IMAGE_MAX_TOKENS=0` to disable capping for OCR-style tasks.
+
 ### OpenAI‑compatible API
 
 The same endpoint also serves an OpenAI‑compatible API at

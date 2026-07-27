@@ -16,10 +16,11 @@ PORT="${PORT:-8080}"
 HOST="${HOST:-0.0.0.0}"
 NGL="${NGL:-99}"     # GPU layers (Metal/CUDA)
 
-# Model definitions:  HF_REPO  MODEL_FILE  DSPARK_FILE  DSPARK_FLAG
+# Model definitions:  HF_REPO | MODEL_FILE | DSPARK_FILE | DSPARK_ARGS | MMPROJ_FILE
+# (pipe-separated because DSPARK_ARGS contains spaces)
 declare -A MODELS
-MODELS[1bit]="prism-ml/Bonsai-27B-gguf  Bonsai-27B-Q1_0.gguf  Bonsai-27B-dspark-Q4_1.gguf  --spec-type draft-dspark --spec-draft-n-max 4"
-MODELS[ternary]="prism-ml/Ternary-Bonsai-27B-gguf  Ternary-Bonsai-27B-Q2_0.gguf  Ternary-Bonsai-27B-dspark-Q4_1.gguf  --spec-type draft-dspark --spec-draft-n-max 4"
+MODELS[1bit]="prism-ml/Bonsai-27B-gguf|Bonsai-27B-Q1_0.gguf|Bonsai-27B-dspark-Q4_1.gguf|--spec-type draft-dspark --spec-draft-n-max 4|Bonsai-27B-mmproj-Q8_0.gguf"
+MODELS[ternary]="prism-ml/Ternary-Bonsai-27B-gguf|Ternary-Bonsai-27B-Q2_0.gguf|Ternary-Bonsai-27B-dspark-Q4_1.gguf|--spec-type draft-dspark --spec-draft-n-max 4|Ternary-Bonsai-27B-mmproj-Q8_0.gguf"
 
 # ─── Help ─────────────────────────────────────────────────────────────
 if [[ "${MODEL_VARIANT}" == "-h" || "${MODEL_VARIANT}" == "--help" ]]; then
@@ -50,7 +51,7 @@ case "${MODEL_VARIANT}" in
     ;;
 esac
 
-IFS=' ' read -r HF_REPO MODEL_FILE DSPARK_FILE DSPARK_ARGS <<< "${MODELS[$KEY]}"
+IFS='|' read -r HF_REPO MODEL_FILE DSPARK_FILE DSPARK_ARGS MMPROJ_FILE <<< "${MODELS[$KEY]}"
 
 echo "══════════════════════════════════════════════"
 echo "  Bonsai 27B Runner"
@@ -58,6 +59,7 @@ echo "  Variant:    ${MODEL_VARIANT}"
 echo "  HF repo:    ${HF_REPO}"
 echo "  Model:      ${MODEL_FILE}"
 if $DSPARK; then echo "  Drafter:    ${DSPARK_FILE}"; fi
+if [[ -n "${MMPROJ_FILE}" ]]; then echo "  Vision:     ${MMPROJ_FILE}"; fi
 echo "══════════════════════════════════════════════"
 
 # ─── Step 1: Check prerequisites ─────────────────────────────────────
@@ -227,6 +229,8 @@ fi
 # Download drafter if requested
 DSPARK_MODEL_PATH=""
 DSPARK_SERVER_ARGS=""
+MMPROJ_PATH=""
+MMPROJ_SERVER_ARGS=""
 if $DSPARK; then
   DSPARK_MODEL_PATH="${MODELS_DIR}/${KEY}/${DSPARK_FILE}"
   if [[ -f "${DSPARK_MODEL_PATH}" ]]; then
@@ -251,6 +255,38 @@ if $DSPARK; then
     echo "✔  Drafter downloaded"
   fi
   DSPARK_SERVER_ARGS="-md ${DSPARK_MODEL_PATH} ${DSPARK_ARGS}"
+fi
+
+# ─── Step 4b: Download multimodal projector (vision tower) ──────────
+# Bonsai-27B is a vision-language model: the mmproj file enables image input.
+# It is loaded only when an image arrives, so text-only inference is unaffected.
+if [[ -n "${MMPROJ_FILE}" ]]; then
+  MMPROJ_PATH="${MODELS_DIR}/${KEY}/${MMPROJ_FILE}"
+  if [[ -f "${MMPROJ_PATH}" ]]; then
+    echo "✔  Multimodal projector already downloaded: $(du -h "${MMPROJ_PATH}" | cut -f1)"
+  else
+    # Check common local cache paths
+    for CACHE in \
+      "${MODELS_DIR}/${MMPROJ_FILE}" \
+      "${HOME}/.cache/huggingface/hub/${MMPROJ_FILE}" \
+      "${HOME}/models/${MMPROJ_FILE}" \
+      "./models/${MMPROJ_FILE}"
+    do
+      if [[ -f "$CACHE" ]]; then
+        echo "✔  Found cached mmproj at $CACHE — symlinking..."
+        ln -sf "$CACHE" "${MMPROJ_PATH}"
+        break
+      fi
+    done
+  fi
+  # Download if still not present
+  if [[ ! -f "${MMPROJ_PATH}" ]]; then
+    echo "   Downloading multimodal projector ${HF_REPO}/${MMPROJ_FILE} from HuggingFace ..."
+    echo "   (This enables image input — ~0.6 GB)"
+    ${HF_CMD} download "${HF_REPO}" "${MMPROJ_FILE}" --local-dir "${MODELS_DIR}/${KEY}" 2>&1
+    echo "✔  Multimodal projector downloaded"
+  fi
+  MMPROJ_SERVER_ARGS="-mm ${MMPROJ_PATH}"
 fi
 
 # ─── Port fallback (try PORT, PORT+1, PORT+2) ─────────────────────────
@@ -278,6 +314,7 @@ fi
 echo ""
 echo "── Step 5: Starting llama-server ──"
 echo "   Model:     ${MODEL_PATH}"
+if [[ -n "${MMPROJ_PATH}" ]]; then echo "   Vision:    ${MMPROJ_PATH}"; fi
 echo "   Endpoint:  http://${HOST}:${FINAL_PORT}"
 echo "   GPU layers: ${NGL}"
 echo ""
@@ -286,6 +323,7 @@ echo ""
 
 exec "${SERVER_BIN}" \
   -m "${MODEL_PATH}" \
+  ${MMPROJ_SERVER_ARGS} \
   ${DSPARK_SERVER_ARGS} \
   --host "${HOST}" \
   --port "${FINAL_PORT}" \
@@ -293,4 +331,5 @@ exec "${SERVER_BIN}" \
   -c 0 \
   --temp 0.7 \
   --top-p 0.95 \
-  --top-k 40
+  --top-k 40 \
+  --image-max-tokens 1024

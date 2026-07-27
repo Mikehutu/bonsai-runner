@@ -24,7 +24,7 @@ E=$(bash "$CD/start.sh" nonexistent 2>&1 || true)
 check "Unknown variant" "$E" "rejects bad variant"
 check "1bit, ternary"   "$E" "lists valid variants on error"
 
-E=$(bash "$CD/start.sh" '' 2>&1 || true)
+E=$(timeout 5 bash "$CD/start.sh" '' 2>&1 || true)
 check "1bit" "$E" "no-arg defaults to 1bit (no error)"
 
 # ─── 3. Variant resolution ──────────────────────────────────
@@ -32,21 +32,23 @@ echo ""
 echo "═══ 3. Model config resolution �══"
 
 declare -A MODELS
-MODELS[1bit]="prism-ml/Bonsai-27B-gguf  Bonsai-27B-Q1_0.gguf  Bonsai-27B-dspark-Q4_1.gguf  --spec-type draft-dspark --spec-draft-n-max 4"
-MODELS[ternary]="prism-ml/Ternary-Bonsai-27B-gguf  Ternary-Bonsai-27B-Q2_0.gguf  Ternary-Bonsai-27B-dspark-Q4_1.gguf  --spec-type draft-dspark --spec-draft-n-max 4"
+MODELS[1bit]="prism-ml/Bonsai-27B-gguf|Bonsai-27B-Q1_0.gguf|Bonsai-27B-dspark-Q4_1.gguf|--spec-type draft-dspark --spec-draft-n-max 4|Bonsai-27B-mmproj-Q8_0.gguf"
+MODELS[ternary]="prism-ml/Ternary-Bonsai-27B-gguf|Ternary-Bonsai-27B-Q2_0.gguf|Ternary-Bonsai-27B-dspark-Q4_1.gguf|--spec-type draft-dspark --spec-draft-n-max 4|Ternary-Bonsai-27B-mmproj-Q8_0.gguf"
 
 # 1-bit checks
-IFS=' ' read -r R M D A <<< "${MODELS[1bit]}"
+IFS='|' read -r R M D A MM <<< "${MODELS[1bit]}"
 [[ "$R" == "prism-ml/Bonsai-27B-gguf"              ]] && pass "1bit HF repo correct"         || fail "1bit HF repo: $R"
 [[ "$M" == "Bonsai-27B-Q1_0.gguf"                   ]] && pass "1bit model file correct"      || fail "1bit model: $M"
 [[ "$D" == "Bonsai-27B-dspark-Q4_1.gguf"            ]] && pass "1bit dspark file correct"     || fail "1bit dspark: $D"
 check "draft-dspark" "$A" "1bit dspark args include draft-dspark"
+[[ "$MM" == "Bonsai-27B-mmproj-Q8_0.gguf"           ]] && pass "1bit mmproj file correct"     || fail "1bit mmproj: $MM"
 
 # Ternary checks
-IFS=' ' read -r R M D A <<< "${MODELS[ternary]}"
+IFS='|' read -r R M D A MM <<< "${MODELS[ternary]}"
 [[ "$R" == "prism-ml/Ternary-Bonsai-27B-gguf"       ]] && pass "ternary HF repo correct"      || fail "ternary HF repo: $R"
 [[ "$M" == "Ternary-Bonsai-27B-Q2_0.gguf"            ]] && pass "ternary model file correct"   || fail "ternary model: $M"
 [[ "$D" == "Ternary-Bonsai-27B-dspark-Q4_1.gguf"    ]] && pass "ternary dspark file correct"  || fail "ternary dspark: $D"
+[[ "$MM" == "Ternary-Bonsai-27B-mmproj-Q8_0.gguf"   ]] && pass "ternary mmproj file correct"  || fail "ternary mmproj: $MM"
 
 # ─── 4. File structure ─────────────────────────────────────
 echo ""
@@ -71,6 +73,8 @@ check "exec "           "$S" "uses exec to start server (clean process)"
 check "Ctrl+C"          "$S" "tells user how to stop"
 check "Configuring"     "$S" "cmake configure step has feedback"
 check "Cleaning and retrying" "$S" "stale build dir recovery"
+check "mmproj"          "$S" "references mmproj (vision tower)"
+check "image-max-tokens" "$S" "passes image-max-tokens to llama-server"
 
 # ─── 6. Dry-run flow (prereq detection) ─────────────────────
 echo ""

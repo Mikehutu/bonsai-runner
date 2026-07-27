@@ -58,11 +58,18 @@ The `start.sh` script uses a `MODELS` associative array to define variants:
 
 ```bash
 declare -A MODELS
-MODELS[1bit]="prism-ml/Bonsai-27B-gguf  Bonsai-27B-Q1_0.gguf  Bonsai-27B-dspark-Q4_1.gguf  --spec-type draft-dspark --spec-draft-n-max 4"
-MODELS[ternary]="prism-ml/Ternary-Bonsai-27B-gguf  Ternary-Bonsai-27B-Q2_0.gguf  Ternary-Bonsai-27B-dspark-Q4_1.gguf  --spec-type draft-dspark --spec-draft-n-max 4"
+MODELS[1bit]="prism-ml/Bonsai-27B-gguf|Bonsai-27B-Q1_0.gguf|Bonsai-27B-dspark-Q4_1.gguf|--spec-type draft-dspark --spec-draft-n-max 4|Bonsai-27B-mmproj-Q8_0.gguf"
+MODELS[ternary]="prism-ml/Ternary-Bonsai-27B-gguf|Ternary-Bonsai-27B-Q2_0.gguf|Ternary-Bonsai-27B-dspark-Q4_1.gguf|--spec-type draft-dspark --spec-draft-n-max 4|Ternary-Bonsai-27B-mmproj-Q8_0.gguf"
 ```
 
-Each entry is: `HF_REPO  MODEL_FILE  DSPARK_FILE  DSPARK_ARGS`
+Each entry is pipe-separated: `HF_REPO | MODEL_FILE | DSPARK_FILE | DSPARK_ARGS | MMPROJ_FILE`
+
+Pipe-separation is used because `DSPARK_ARGS` contains spaces (e.g.
+`--spec-type draft-dspark --spec-draft-n-max 4`). The `MMPROJ_FILE` is the
+multimodal projector (vision tower) — it is downloaded from the same HF repo
+and passed to `llama-server` via the `-mm` flag. This enables image input.
+The projector is loaded only when an image arrives, so text-only inference is
+unaffected.
 
 **To add a new variant:**
 1. Add a new entry to the `MODELS` array
@@ -109,6 +116,7 @@ in their browser. llama.cpp's built-in web UI is already running — no Docker,
 no extra steps. The UI supports:
 - Chat with the model
 - File upload (PDF, images, text, code)
+- Image input — click the `+` icon to upload a photo or screenshot
 - Multi-turn conversation
 - Copy/paste responses
 
