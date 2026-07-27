@@ -94,6 +94,82 @@ elif [[ "$(uname)" == "Darwin" ]] && command -v metal &>/dev/null 2>&1 || true; 
 fi
 echo "   Backend: ${BACKEND}"
 
+# ─── Hardware detection & model recommendation ────────────────────────
+# If no variant specified (default), detect available VRAM/RAM and
+# recommend the best-fitting model.
+if [[ "${1:-}" == "" ]]; then
+  TOTAL_VRAM_MB=0
+  TOTAL_RAM_MB=0
+
+  # Get total system RAM
+  if [[ "$(uname)" == "Linux" ]]; then
+    TOTAL_RAM_MB=$(grep MemTotal /proc/meminfo 2>/dev/null | awk '{print int($2/1024)}')
+  elif [[ "$(uname)" == "Darwin" ]]; then
+    TOTAL_RAM_MB=$(sysctl -n hw.memsize 2>/dev/null | awk '{print int($1/1048576)}')
+  fi
+
+  # Get GPU VRAM if CUDA
+  if [[ "${BACKEND}" == "CUDA" ]]; then
+    TOTAL_VRAM_MB=$(nvidia-smi --query-gpu=memory.total --format=csv=noheader,nounits 2>/dev/null | head -1 | tr -d ' ')
+  fi
+
+  echo ""
+  echo "── Hardware Detection ──"
+  echo "   System RAM: ${TOTAL_RAM_MB} MB"
+  if [[ "${BACKEND}" == "CUDA" ]]; then
+    echo "   GPU VRAM:   ${TOTAL_VRAM_MB} MB"
+  fi
+
+  echo ""
+  echo "── Model Recommendations ──"
+  echo "   Available variants:"
+  echo "     1bit        3.9 GB model  — fits in 6 GB VRAM, 5 GB RAM"
+  echo "     ternary     7.2 GB model  — fits in 10 GB VRAM, 9 GB RAM"
+  echo "     1bit+dspark 5.7 GB model  — CUDA only, needs 8 GB VRAM"
+  echo "     ternary+dspark 9.1 GB model — CUDA only, needs 12 GB VRAM"
+  echo ""
+
+  # Recommend based on hardware
+  if [[ "${BACKEND}" == "CUDA" ]] && [[ "${TOTAL_VRAM_MB}" -gt 0 ]]; then
+    if [[ "${TOTAL_VRAM_MB}" -ge 12000 ]]; then
+      echo "   ✅ Recommended: ternary+dspark (you have ${TOTAL_VRAM_MB} MB VRAM)"
+    elif [[ "${TOTAL_VRAM_MB}" -ge 8000 ]]; then
+      echo "   ✅ Recommended: 1bit+dspark (you have ${TOTAL_VRAM_MB} MB VRAM)"
+    elif [[ "${TOTAL_VRAM_MB}" -ge 6000 ]]; then
+      echo "   ✅ Recommended: 1bit (you have ${TOTAL_VRAM_MB} MB VRAM)"
+    else
+      echo "   ⚠  Your GPU (${TOTAL_VRAM_MB} MB) may not have enough VRAM for 27B models"
+      echo "   ✅ Recommended: 1bit (smallest footprint)"
+    fi
+  elif [[ "${BACKEND}" == "Metal" ]]; then
+    echo "   ✅ Recommended: 1bit (Metal, 3.9 GB)"
+  else
+    # CPU — check RAM
+    if [[ "${TOTAL_RAM_MB}" -ge 10000 ]]; then
+      echo "   ✅ Recommended: ternary (you have ${TOTAL_RAM_MB} MB RAM)"
+    elif [[ "${TOTAL_RAM_MB}" -ge 5000 ]]; then
+      echo "   ✅ Recommended: 1bit (you have ${TOTAL_RAM_MB} MB RAM)"
+    else
+      echo "   ⚠  Your system (${TOTAL_RAM_MB} MB RAM) may be tight for 27B models"
+      echo "   ✅ Recommended: 1bit (smallest footprint)"
+    fi
+  fi
+  echo ""
+  echo "   To use a specific variant: bash start.sh <variant>"
+  echo "   To skip this and use default (1bit): press Enter or set MODEL_VARIANT=1bit"
+  echo ""
+
+  # Interactive prompt if running in a TTY
+  if [[ -t 0 ]]; then
+    read -p "Choose variant [1bit/ternary/1bit+dspark/ternary+dspark] (default: 1bit): " CHOSEN
+    if [[ -n "${CHOSEN}" ]]; then
+      MODEL_VARIANT="${CHOSEN}"
+    fi
+  else
+    echo "   (Non-interactive mode — using default: 1bit)"
+  fi
+fi
+
 if $PREREQ_FAIL; then
   echo ""
   echo "❌ Install missing prerequisites and re-run."

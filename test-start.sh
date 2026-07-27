@@ -26,6 +26,8 @@ check "1bit, ternary"   "$E" "lists valid variants on error"
 
 E=$(timeout 5 bash "$CD/start.sh" '' 2>&1 || true)
 check "1bit" "$E" "no-arg defaults to 1bit (no error)"
+check "Hardware Detection" "$E" "no-arg shows hardware detection"
+check "Model Recommendations" "$E" "no-arg shows model recommendations"
 
 # ─── 3. Variant resolution ──────────────────────────────────
 echo ""
@@ -75,6 +77,9 @@ check "Configuring"     "$S" "cmake configure step has feedback"
 check "Cleaning and retrying" "$S" "stale build dir recovery"
 check "mmproj"          "$S" "references mmproj (vision tower)"
 check "image-max-tokens" "$S" "passes image-max-tokens to llama-server"
+check "Hardware Detection" "$S" "has hardware detection section"
+check "Model Recommendations" "$S" "has model recommendations section"
+check "MemTotal" "$S" "detects system RAM from /proc/meminfo"
 
 # ─── 6. Dry-run flow (prereq detection) ─────────────────────
 echo ""

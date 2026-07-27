@@ -177,11 +177,20 @@ This checks:
 ```bash
 git clone https://github.com/Mikehutu/bonsai-runner
 cd bonsai-runner
-bash start.sh                # 1-bit (3.9 GB)
+bash start.sh                # 1-bit (3.9 GB) — auto-detects hardware and recommends
 bash start.sh ternary        # ternary (7.2 GB)
 ```
 
-The server will be at `http://localhost:8080`.
+When run with no arguments, `start.sh` auto-detects the machine's hardware
+(CUDA VRAM, Metal, or system RAM) and recommends the best-fitting model
+variant. On interactive terminals, it prompts the user to choose. On
+non-interactive (CI, SSH), it defaults to `1bit`.
+
+To skip detection and use a specific variant, pass it explicitly:
+```bash
+bash start.sh ternary        # skip detection, use ternary
+bash start.sh 1bit+dspark    # skip detection, use 1-bit with DSpark
+```
 
 ### Help a user open the web UI
 

@@ -28,6 +28,10 @@ bash start.sh 1bit+dspark      # with speculative decoding
 bash start.sh ternary+dspark   # quality + speed
 ```
 
+**Tip:** Run `bash start.sh` with no arguments to auto-detect your hardware
+and get a model recommendation. On interactive terminals, you'll be prompted
+to choose. On SSH/CI, it defaults to `1bit`.
+
 The script will:
 
 1. ✅ Check prerequisites (cmake, make, python3)
