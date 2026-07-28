@@ -131,16 +131,26 @@ llama-server auto-detects `n_parallel` based on CPU cores. On a 24-thread
 machine, it defaults to 4 (n_cores / 2, capped). This means 4 concurrent
 requests can be processed.
 
-To override:
+The `start.sh` script exposes this via the `PARALLEL` env var:
+
 ```bash
-# Add to the exec line in start.sh:
---parallel 1    # Lower memory, single request only
---parallel 8    # More concurrency, more memory
+# Default: auto (llama-server picks based on CPU cores)
+bash start.sh ternary
+
+# Single-request mode (benchmark-safe, lower memory)
+PARALLEL=1 bash start.sh ternary
+
+# Explicit concurrency
+PARALLEL=4 bash start.sh ternary
 ```
 
 Each parallel slot gets its own copy of the KV cache, so memory usage scales
-linearly with `n_parallel`. For CPU-only inference, `--parallel 1` is
+linearly with `n_parallel`. For CPU-only inference, `PARALLEL=1` is
 recommended to minimize memory pressure.
+
+**Benchmark note:** Always use `PARALLEL=1` when running tool-eval-bench or
+other single-turn benchmarks. The default auto-detection may pick `n_parallel=4`,
+which contaminates latency measurements.
 
 ### Model Variant Quick Reference
 

@@ -15,6 +15,7 @@ MODELS_DIR="${HOME}/.bonsai/models"
 PORT="${PORT:-8080}"
 HOST="${HOST:-0.0.0.0}"
 NGL="${NGL:-99}"     # GPU layers (Metal/CUDA)
+PARALLEL="${PARALLEL:-0}"   # 0 = auto (llama-server default), 1 = single-request (benchmark-safe)
 
 # Model definitions:  HF_REPO | MODEL_FILE | DSPARK_FILE | DSPARK_ARGS | MMPROJ_FILE
 # (pipe-separated because DSPARK_ARGS contains spaces)
@@ -33,7 +34,7 @@ if [[ "${MODEL_VARIANT}" == "-h" || "${MODEL_VARIANT}" == "--help" ]]; then
   echo "  ternary+dspark Ternary + DSpark drafter     — 9.1 GB"
   echo ""
   echo "Environment variables:"
-  echo "  PORT=8080   HOST=0.0.0.0   NGL=99"
+  echo "  PORT=8080   HOST=0.0.0.0   NGL=99   PARALLEL=0"
   exit 0
 fi
 
@@ -116,10 +117,12 @@ if [[ "${1:-}" == "" ]]; then
   # Get GPU VRAM if CUDA (errors suppressed for set -e strict mode)
   if [[ "${BACKEND}" == "CUDA" ]]; then
     TOTAL_VRAM_MB=$(nvidia-smi --query-gpu=memory.total --format=csv,noheader 2>/dev/null | head -1 | tr -d ' ' 2>/dev/null || echo 0)
-    if [[ -z "${TOTAL_VRAM_MB}" ]] || ! [[ "${TOTAL_VRAM_MB}" -gt 0 ]] 2>/dev/null; then
+    # On unified-memory systems (e.g. DGX Spark GB10), nvidia-smi reports
+    # [N/A] for memory.total. Keep CUDA backend — the GPU is usable, VRAM
+    # is just not separately queryable.
+    if [[ -z "${TOTAL_VRAM_MB}" ]] || ! [[ "${TOTAL_VRAM_MB}" =~ ^[0-9]+$ ]] 2>/dev/null; then
       TOTAL_VRAM_MB=0
-      BACKEND="CPU"
-      echo "   (GPU not usable — falling back to CPU)"
+      echo "   (GPU VRAM not queryable — unified memory system, using CUDA)"
     fi
   fi
 
@@ -127,7 +130,11 @@ if [[ "${1:-}" == "" ]]; then
   echo "── Hardware Detection ──"
   echo "   System RAM: ${TOTAL_RAM_MB} MB"
   if [[ "${BACKEND}" == "CUDA" ]]; then
-    echo "   GPU VRAM:   ${TOTAL_VRAM_MB} MB"
+    if [[ "${TOTAL_VRAM_MB}" -gt 0 ]]; then
+      echo "   GPU VRAM:   ${TOTAL_VRAM_MB} MB"
+    else
+      echo "   GPU:        NVIDIA (unified memory — VRAM not separately queryable)"
+    fi
   fi
 
   echo ""
@@ -149,6 +156,15 @@ if [[ "${1:-}" == "" ]]; then
       echo "   ✅ Recommended: 1bit (you have ${TOTAL_VRAM_MB} MB VRAM)"
     else
       echo "   ⚠  Your GPU (${TOTAL_VRAM_MB} MB) may not have enough VRAM for 27B models"
+      echo "   ✅ Recommended: 1bit (smallest footprint)"
+    fi
+  elif [[ "${BACKEND}" == "CUDA" ]]; then
+    # Unified memory (VRAM not queryable) — use system RAM as proxy
+    if [[ "${TOTAL_RAM_MB}" -ge 10000 ]]; then
+      echo "   ✅ Recommended: ternary+dspark (CUDA + ${TOTAL_RAM_MB} MB unified RAM)"
+    elif [[ "${TOTAL_RAM_MB}" -ge 5000 ]]; then
+      echo "   ✅ Recommended: 1bit+dspark (CUDA + ${TOTAL_RAM_MB} MB unified RAM)"
+    else
       echo "   ✅ Recommended: 1bit (smallest footprint)"
     fi
   elif [[ "${BACKEND}" == "Metal" ]]; then
@@ -187,14 +203,15 @@ if $PREREQ_FAIL; then
 fi
 
 # ─── Step 2: Install huggingface-hub CLI ──────────────────────────────
+# Prefer 'hf' (new CLI) over 'huggingface-cli' (deprecated, prints warnings, may fail)
 HF_CMD=""
 HF_VENV=""
-if command -v huggingface-cli &>/dev/null; then
-  HF_CMD="huggingface-cli"
-  echo "✔  huggingface-cli already available"
-elif command -v hf &>/dev/null; then
+if command -v hf &>/dev/null; then
   HF_CMD="hf"
   echo "✔  hf CLI already available"
+elif command -v huggingface-cli &>/dev/null; then
+  HF_CMD="huggingface-cli"
+  echo "✔  huggingface-cli already available (deprecated — consider upgrading to 'hf')"
 else
   echo ""
   echo "── Step 2: Installing huggingface-hub CLI ──"
@@ -206,9 +223,12 @@ else
     HF_VENV="${HOME}/.bonsai/venv-hf"
     python3 -m venv "${HF_VENV}" 2>/dev/null
     "${HF_VENV}/bin/pip" install -q huggingface-hub 2>/dev/null
-    if [[ -f "${HF_VENV}/bin/huggingface-cli" ]]; then
-      HF_CMD="${HF_VENV}/bin/huggingface-cli"
+    if [[ -f "${HF_VENV}/bin/hf" ]]; then
+      HF_CMD="${HF_VENV}/bin/hf"
       echo "✔  huggingface-hub installed in venv at ${HF_VENV}"
+    elif [[ -f "${HF_VENV}/bin/huggingface-cli" ]]; then
+      HF_CMD="${HF_VENV}/bin/huggingface-cli"
+      echo "✔  huggingface-hub installed in venv at ${HF_VENV} (deprecated — consider upgrading to 'hf')"
     else
       echo "⚠  Could not install huggingface-hub. Install manually:"
       echo "   python3 -m venv ~/.bonsai/venv-hf"
@@ -216,12 +236,12 @@ else
       exit 1
     fi
   fi
-  # Detect command after install
+  # Detect command after install — prefer 'hf' over deprecated 'huggingface-cli'
   if [[ -z "${HF_CMD}" ]]; then
-    if command -v huggingface-cli &>/dev/null; then
-      HF_CMD="huggingface-cli"
-    elif command -v hf &>/dev/null; then
+    if command -v hf &>/dev/null; then
       HF_CMD="hf"
+    elif command -v huggingface-cli &>/dev/null; then
+      HF_CMD="huggingface-cli"
     else
       echo "⚠  huggingface-hub CLI not in PATH after install."
       HF_CMD="python3 -m huggingface_hub.huggingface_cli"
@@ -229,7 +249,35 @@ else
   fi
 fi
 
-# ─── Step 3: Build or update llama.cpp (PrismML fork) �───────────────
+# ─── Helper: safe download with fallback ──────────────────────────────
+# Downloads a file from HuggingFace. If the primary HF_CMD fails (e.g.
+# deprecated 'huggingface-cli' prints warnings and exits non-zero),
+# falls back to 'hf' if available.
+# Temporarily unsets HF_HUB_OFFLINE so downloads work even if the user's
+# shell profile sets it (common on airgapped machines with pre-cached models).
+download_model() {
+  local repo="$1" file="$2" dest="$3"
+  # Unset HF_HUB_OFFLINE for the download — we want to reach HuggingFace
+  ( unset HF_HUB_OFFLINE; ${HF_CMD} download "${repo}" "${file}" --local-dir "${dest}" ) 2>&1
+  if [[ $? -ne 0 ]]; then
+    echo "   ⚠  '${HF_CMD}' failed — trying 'hf' as fallback..."
+    # Check system PATH first, then venv
+    if command -v hf &>/dev/null; then
+      ( unset HF_HUB_OFFLINE; hf download "${repo}" "${file}" --local-dir "${dest}" ) 2>&1
+    elif [[ -n "${HF_VENV}" && -x "${HF_VENV}/bin/hf" ]]; then
+      ( unset HF_HUB_OFFLINE; "${HF_VENV}/bin/hf" download "${repo}" "${file}" --local-dir "${dest}" ) 2>&1
+    else
+      echo "❌  Download failed and no 'hf' fallback available."
+      return 1
+    fi
+    if [[ $? -ne 0 ]]; then
+      echo "❌  Download failed."
+      return 1
+    fi
+  fi
+}
+
+# ─── Step 3: Build or update llama.cpp (PrismML fork) ────────────────
 echo ""
 echo "── Step 3: Building llama.cpp (PrismML fork) �─"
 mkdir -p "${HOME}/.bonsai"
@@ -308,7 +356,7 @@ fi
 if [[ ! -f "${MODEL_PATH}" ]]; then
   echo "   Downloading ${HF_REPO}/${MODEL_FILE} from HuggingFace ..."
   echo "   (This may take a while — file is $( [[ $KEY == "ternary" ]] && echo "~7.2 GB" || echo "~3.9 GB"))"
-  ${HF_CMD} download "${HF_REPO}" "${MODEL_FILE}" --local-dir "${MODELS_DIR}/${KEY}" 2>&1
+  download_model "${HF_REPO}" "${MODEL_FILE}" "${MODELS_DIR}/${KEY}"
   echo "✔  Downloaded: ${MODEL_PATH}"
 fi
 
@@ -337,7 +385,7 @@ if $DSPARK; then
   fi
   if [[ ! -f "${DSPARK_MODEL_PATH}" ]]; then
     echo "   Downloading drafter ${HF_REPO}/${DSPARK_FILE} from HuggingFace ..."
-    ${HF_CMD} download "${HF_REPO}" "${DSPARK_FILE}" --local-dir "${MODELS_DIR}/${KEY}" 2>&1
+    download_model "${HF_REPO}" "${DSPARK_FILE}" "${MODELS_DIR}/${KEY}"
     echo "✔  Drafter downloaded"
   fi
   DSPARK_SERVER_ARGS="-md ${DSPARK_MODEL_PATH} ${DSPARK_ARGS}"
@@ -369,7 +417,7 @@ if [[ -n "${MMPROJ_FILE}" ]]; then
   if [[ ! -f "${MMPROJ_PATH}" ]]; then
     echo "   Downloading multimodal projector ${HF_REPO}/${MMPROJ_FILE} from HuggingFace ..."
     echo "   (This enables image input — ~0.6 GB)"
-    ${HF_CMD} download "${HF_REPO}" "${MMPROJ_FILE}" --local-dir "${MODELS_DIR}/${KEY}" 2>&1
+    download_model "${HF_REPO}" "${MMPROJ_FILE}" "${MODELS_DIR}/${KEY}"
     echo "✔  Multimodal projector downloaded"
   fi
   MMPROJ_SERVER_ARGS="-mm ${MMPROJ_PATH}"
@@ -403,9 +451,16 @@ echo "   Model:     ${MODEL_PATH}"
 if [[ -n "${MMPROJ_PATH}" ]]; then echo "   Vision:    ${MMPROJ_PATH}"; fi
 echo "   Endpoint:  http://${HOST}:${FINAL_PORT}"
 echo "   GPU layers: ${NGL}"
+echo "   Parallel:   ${PARALLEL:-auto}"
 echo ""
 echo "   Press Ctrl+C to stop."
 echo ""
+
+# Build parallel args — PARALLEL=0 means "auto" (llama-server default)
+PARALLEL_ARGS=""
+if [[ "${PARALLEL}" != "0" && -n "${PARALLEL}" ]]; then
+  PARALLEL_ARGS="--parallel ${PARALLEL}"
+fi
 
 exec "${SERVER_BIN}" \
   -m "${MODEL_PATH}" \
@@ -418,4 +473,5 @@ exec "${SERVER_BIN}" \
   --temp 0.7 \
   --top-p 0.95 \
   --top-k 40 \
-  --image-max-tokens 1024
+  --image-max-tokens 1024 \
+  ${PARALLEL_ARGS}

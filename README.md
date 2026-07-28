@@ -55,17 +55,41 @@ brew install cmake
 
 ## Configuration
 
+See `.env.example` for all available environment variables. Copy it to `.env` and adjust:
+
+```bash
+cp .env.example .env
+```
+
 | Env var | Default | Description |
 | --- | --- | --- |
 | `PORT` | `8080` | Server port (auto‑fallbacks to 8081, 8082 if busy) |
 | `HOST` | `0.0.0.0` | Bind address |
 | `NGL` | `99` | GPU layers (Metal/CUDA — ignored on CPU) |
+| `PARALLEL` | `0` | Server parallelism: `0`=auto, `1`=single-request (benchmark-safe) |
+| `HF_HUB_OFFLINE` | (unset) | Set to `1` for airgapped machines with pre-cached models |
 
 Example:
 
 ```bash
 PORT=18080 NGL=60 bash start.sh ternary
 ```
+
+### Offline / Airgapped Setup
+
+If you cannot reach HuggingFace (airgapped network, no internet), pre-download
+the models on a connected machine:
+
+```bash
+pip install huggingface-hub
+hf download prism-ml/Bonsai-27B-gguf --local-dir ~/.bonsai/models/1bit
+hf download prism-ml/Ternary-Bonsai-27B-gguf --local-dir ~/.bonsai/models/ternary
+```
+
+Then set `HF_HUB_OFFLINE=1` in your shell profile. The `start.sh` script
+automatically unsets this variable during download attempts, so it works
+whether you're online or offline — if the model is already cached, no
+download is attempted.
 
 ---
 
@@ -150,9 +174,10 @@ Both ship with optional DSpark speculative‑decoding drafters for ~1.35× CUDA 
 
 | Variant | Full Suite (79 scenarios) | Finnish (10 FI) | Speed |
 |---|---|---|---|---||
-| **Ternary Q2_0** | **85/100** ⭐ | **90/100** | 5.7 s/turn, 30 t/s |
-| **Q1_0** | **81/100** | **85 Quality** | 5.1 s/turn, 44 t/s |
-| **Ternary + DSpark** | **77** | **85 Quality** | 16.2 s/turn (batch: 1.49× throughput) |
+| **Ternary Q2_0** | **83/100** ⭐ | **90/100** | 2.5s/turn, ~30 t/s |
+| **Q1_0** | **81/100** | **85 Quality** | 5.1s/turn, 44 t/s |
+| **Ternary + DSpark** | **83** | **85 Quality** | 4.9s/turn (corrected) — DSpark hurts on DGX Spark |
+| **Ternary + DSpark** (old) | **77** | **85 Quality** | 16.2s/turn (contaminated — vllm backend) |
 
 Hardware: NVIDIA GB10 (128 GB unified VRAM). Full report at [Bonsai 27B Benchmarks](https://mikehutu.github.io/AI-reports/bonsai-27b-benchmarks/).
 
