@@ -280,16 +280,16 @@ fi
 download_model() {
   local repo="$1" file="$2" dest="$3"
   # Unset HF_HUB_OFFLINE for the download — we want to reach HuggingFace
-  # Also set HF_XET_DISABLE=1 to avoid xet permission errors on machines
+  # Also set HF_HUB_DISABLE_XET=1 to avoid xet permission errors on machines
   # where the xet cache path is not writable (e.g. DGX Spark with /mnt/storage)
-  ( unset HF_HUB_OFFLINE; export HF_XET_DISABLE=1; ${HF_CMD} download "${repo}" "${file}" --local-dir "${dest}" ) 2>&1
+  ( unset HF_HUB_OFFLINE; export HF_HUB_DISABLE_XET=1; ${HF_CMD} download "${repo}" "${file}" --local-dir "${dest}" ) 2>&1
   if [[ $? -ne 0 ]]; then
     echo "   ⚠  '${HF_CMD}' failed — trying 'hf' as fallback..."
     # Check system PATH first, then venv
     if command -v hf &>/dev/null; then
-      ( unset HF_HUB_OFFLINE; export HF_XET_DISABLE=1; hf download "${repo}" "${file}" --local-dir "${dest}" ) 2>&1
+      ( unset HF_HUB_OFFLINE; export HF_HUB_DISABLE_XET=1; hf download "${repo}" "${file}" --local-dir "${dest}" ) 2>&1
     elif [[ -n "${HF_VENV}" && -x "${HF_VENV}/bin/hf" ]]; then
-      ( unset HF_HUB_OFFLINE; export HF_XET_DISABLE=1; "${HF_VENV}/bin/hf" download "${repo}" "${file}" --local-dir "${dest}" ) 2>&1
+      ( unset HF_HUB_OFFLINE; export HF_HUB_DISABLE_XET=1; "${HF_VENV}/bin/hf" download "${repo}" "${file}" --local-dir "${dest}" ) 2>&1
     else
       echo "❌  Download failed and no 'hf' fallback available."
       return 1
