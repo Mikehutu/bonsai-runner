@@ -190,6 +190,28 @@ if [[ "${1:-}" == "" ]]; then
     read -p "Choose variant [1bit/ternary/1bit+dspark/ternary+dspark] (default: 1bit): " CHOSEN
     if [[ -n "${CHOSEN}" ]]; then
       MODEL_VARIANT="${CHOSEN}"
+      # Re-parse variant after interactive selection
+      case "${MODEL_VARIANT}" in
+        1bit)          KEY="1bit"; DSPARK=false  ;;
+        ternary)       KEY="ternary"; DSPARK=false ;;
+        1bit+dspark)   KEY="1bit"; DSPARK=true   ;;
+        ternary+dspark) KEY="ternary"; DSPARK=true ;;
+        *)
+          echo "❌ Unknown variant '${MODEL_VARIANT}'"
+          echo "   Valid: 1bit, ternary, 1bit+dspark, ternary+dspark"
+          exit 1
+          ;;
+      esac
+      IFS='|' read -r HF_REPO MODEL_FILE DSPARK_FILE DSPARK_ARGS MMPROJ_FILE <<< "${MODELS[$KEY]}"
+      echo ""
+      echo "══════════════════════════════════════════════"
+      echo "  Bonsai 27B Runner"
+      echo "  Variant:    ${MODEL_VARIANT}"
+      echo "  HF repo:    ${HF_REPO}"
+      echo "  Model:      ${MODEL_FILE}"
+      if $DSPARK; then echo "  Drafter:    ${DSPARK_FILE}"; fi
+      if [[ -n "${MMPROJ_FILE}" ]]; then echo "  Vision:     ${MMPROJ_FILE}"; fi
+      echo "══════════════════════════════════════════════"
     fi
   else
     echo "   (Non-interactive mode — using default: 1bit)"
@@ -258,14 +280,16 @@ fi
 download_model() {
   local repo="$1" file="$2" dest="$3"
   # Unset HF_HUB_OFFLINE for the download — we want to reach HuggingFace
-  ( unset HF_HUB_OFFLINE; ${HF_CMD} download "${repo}" "${file}" --local-dir "${dest}" ) 2>&1
+  # Also set HF_XET_DISABLE=1 to avoid xet permission errors on machines
+  # where the xet cache path is not writable (e.g. DGX Spark with /mnt/storage)
+  ( unset HF_HUB_OFFLINE; export HF_XET_DISABLE=1; ${HF_CMD} download "${repo}" "${file}" --local-dir "${dest}" ) 2>&1
   if [[ $? -ne 0 ]]; then
     echo "   ⚠  '${HF_CMD}' failed — trying 'hf' as fallback..."
     # Check system PATH first, then venv
     if command -v hf &>/dev/null; then
-      ( unset HF_HUB_OFFLINE; hf download "${repo}" "${file}" --local-dir "${dest}" ) 2>&1
+      ( unset HF_HUB_OFFLINE; export HF_XET_DISABLE=1; hf download "${repo}" "${file}" --local-dir "${dest}" ) 2>&1
     elif [[ -n "${HF_VENV}" && -x "${HF_VENV}/bin/hf" ]]; then
-      ( unset HF_HUB_OFFLINE; "${HF_VENV}/bin/hf" download "${repo}" "${file}" --local-dir "${dest}" ) 2>&1
+      ( unset HF_HUB_OFFLINE; export HF_XET_DISABLE=1; "${HF_VENV}/bin/hf" download "${repo}" "${file}" --local-dir "${dest}" ) 2>&1
     else
       echo "❌  Download failed and no 'hf' fallback available."
       return 1
