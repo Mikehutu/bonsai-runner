@@ -41,6 +41,8 @@ The script will:
 4. ✅ Download your chosen model from HuggingFace (one‑time)
 5. ✅ Start an OpenAI‑compatible server on `http://0.0.0.0:8080`
 
+**To stop the server:** press `Ctrl+C` or run `./stop.sh` in another terminal.
+
 **Requirements:** `cmake`, `make`, `python3`, and a C++ compiler (`build-essential` on Linux, Xcode CLI on macOS).
 
 ```bash
@@ -300,7 +302,8 @@ Bonsai 27B is a Qwen3.6‑27B derivative with **hybrid attention** (~75% linear 
 
 ```
 bonsai-runner/
-├── start.sh          # One‑click runner (this script)
+├── start.sh          # One‑click runner
+├── stop.sh           # Stop the server
 ├── AGENTS.md         # Instructions for AI agents
 ├── README.md         # You are here
 └── test-start.sh     # Validation script (not shipped to end users)

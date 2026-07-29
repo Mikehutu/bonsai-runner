@@ -544,7 +544,7 @@ echo "   GPU layers: ${NGL}"
 echo "   Context:   ${CONTEXT_SIZE:-0} (0 = model default)"
 echo "   Parallel:   ${PARALLEL:-auto}"
 echo ""
-echo "   Press Ctrl+C to stop."
+echo "   Press Ctrl+C to stop, or run ./stop.sh"
 echo ""
 
 # Build parallel args — PARALLEL=0 means "auto" (llama-server default)
@@ -558,7 +558,11 @@ fi
 # CONTEXT_SIZE=262144 → 262K context (tested on CPU + DDR5, ~4 GB model + ~1.6 GB KV cache)
 CTX_ARGS="-c ${CONTEXT_SIZE}"
 
-exec "${SERVER_BIN}" \
+# Write PID file so stop.sh can find the server
+PID_FILE="${HOME}/.bonsai/llama-server.pid"
+mkdir -p "$(dirname "${PID_FILE}")"
+
+"${SERVER_BIN}" \
   -m "${MODEL_PATH}" \
   ${MMPROJ_SERVER_ARGS} \
   ${DSPARK_SERVER_ARGS} \
@@ -570,4 +574,8 @@ exec "${SERVER_BIN}" \
   --top-p 0.95 \
   --top-k 40 \
   --image-max-tokens 1024 \
-  ${PARALLEL_ARGS}
+  ${PARALLEL_ARGS} &
+SERVER_PID=$!
+echo "${SERVER_PID}" > "${PID_FILE}"
+echo "   PID: ${SERVER_PID} (saved to ${PID_FILE})"
+wait "${SERVER_PID}"
