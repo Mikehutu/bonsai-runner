@@ -16,6 +16,7 @@ PORT="${PORT:-8080}"
 HOST="${HOST:-0.0.0.0}"
 NGL="${NGL:-99}"     # GPU layers (Metal/CUDA)
 PARALLEL="${PARALLEL:-0}"   # 0 = auto (llama-server default), 1 = single-request (benchmark-safe)
+CONTEXT_SIZE="${CONTEXT_SIZE:-0}"  # 0 = model default (typically 32K). Set to e.g. 262144 for 262K context.
 
 # Model definitions:  HF_REPO | MODEL_FILE | DSPARK_FILE | DSPARK_ARGS | MMPROJ_FILE
 # (pipe-separated because DSPARK_ARGS contains spaces)
@@ -34,7 +35,13 @@ if [[ "${MODEL_VARIANT}" == "-h" || "${MODEL_VARIANT}" == "--help" ]]; then
   echo "  ternary+dspark Ternary + DSpark drafter     — 9.1 GB"
   echo ""
   echo "Environment variables:"
-  echo "  PORT=8080   HOST=0.0.0.0   NGL=99   PARALLEL=0"
+echo "  PORT=8080   HOST=0.0.0.0   NGL=99   PARALLEL=0   CONTEXT_SIZE=0"
+echo ""
+echo "Context size:"
+echo "  CONTEXT_SIZE=0       model default (~32K, lowest RAM)"
+echo "  CONTEXT_SIZE=65536   64K context"
+echo "  CONTEXT_SIZE=131072  128K context"
+echo "  CONTEXT_SIZE=262144  262K context (max)"
   exit 0
 fi
 
@@ -146,6 +153,34 @@ if [[ "${1:-}" == "" ]]; then
   echo "     ternary+dspark 9.1 GB model — CUDA only, needs 12 GB VRAM"
   echo ""
 
+  # Context size estimation
+  # KV cache for a 27B model: ~6 MB per 1K tokens (Q1_0) or ~8 MB (ternary)
+  # Formula: available_ram_for_kv = total_ram - model_size - 1 GB overhead
+  if [[ "${TOTAL_RAM_MB}" -gt 0 ]]; then
+    if [[ "${KEY}" == "ternary" ]]; then
+      MODEL_SIZE_MB=7200
+      KV_PER_1K_MB=8
+    else
+      MODEL_SIZE_MB=3900
+      KV_PER_1K_MB=6
+    fi
+    AVAIL_RAM_MB=$((TOTAL_RAM_MB - MODEL_SIZE_MB - 1024))  # subtract model + 1 GB overhead
+    if [[ "${AVAIL_RAM_MB}" -gt 0 ]]; then
+      MAX_CTX_K=$((AVAIL_RAM_MB / KV_PER_1K_MB))
+      # Cap at 262K (model's practical limit)
+      if [[ "${MAX_CTX_K}" -gt 262 ]]; then
+        MAX_CTX_K=262
+      fi
+      echo "   Context estimate: ~${MAX_CTX_K}K tokens (based on ${TOTAL_RAM_MB} MB RAM)"
+      echo "   Set CONTEXT_SIZE=$((MAX_CTX_K * 1024)) for max context, or"
+      echo "   CONTEXT_SIZE=0 for model default (~32K)"
+    else
+      echo "   ⚠  Tight on RAM — model may not fit with extra context"
+      echo "   Set CONTEXT_SIZE=0 (model default) or try a smaller variant"
+    fi
+  fi
+  echo ""
+
   # Recommend based on hardware
   if [[ "${BACKEND}" == "CUDA" ]] && [[ "${TOTAL_VRAM_MB}" -gt 0 ]]; then
     if [[ "${TOTAL_VRAM_MB}" -ge 12000 ]]; then
@@ -212,6 +247,37 @@ if [[ "${1:-}" == "" ]]; then
       if $DSPARK; then echo "  Drafter:    ${DSPARK_FILE}"; fi
       if [[ -n "${MMPROJ_FILE}" ]]; then echo "  Vision:     ${MMPROJ_FILE}"; fi
       echo "══════════════════════════════════════════════"
+    fi
+
+    # ── Context size prompt ──────────────────────────────
+    # Recalculate context estimate for the chosen variant
+    if [[ "${KEY}" == "ternary" ]]; then
+      MODEL_SIZE_MB=7200
+      KV_PER_1K_MB=8
+    else
+      MODEL_SIZE_MB=3900
+      KV_PER_1K_MB=6
+    fi
+    AVAIL_RAM_MB=$((TOTAL_RAM_MB - MODEL_SIZE_MB - 1024))
+    MAX_CTX_K=0
+    if [[ "${AVAIL_RAM_MB}" -gt 0 ]]; then
+      MAX_CTX_K=$((AVAIL_RAM_MB / KV_PER_1K_MB))
+      [[ "${MAX_CTX_K}" -gt 262 ]] && MAX_CTX_K=262
+    fi
+
+    echo ""
+    echo "── Context Size ──"
+    echo "   Your machine can handle up to ~${MAX_CTX_K}K tokens of context."
+    echo "   Options:"
+    echo "     0        = model default (~32K, lowest RAM)"
+    echo "     65536    = 64K context"
+    echo "     131072   = 128K context"
+    echo "     $((MAX_CTX_K * 1024)) = ${MAX_CTX_K}K (max for your hardware)"
+    echo ""
+    read -p "Context size [0/65536/131072/$((MAX_CTX_K * 1024))] (default: 0): " CTX_CHOSEN
+    if [[ -n "${CTX_CHOSEN}" ]]; then
+      CONTEXT_SIZE="${CTX_CHOSEN}"
+      echo "   → Context: ${CONTEXT_SIZE} tokens"
     fi
   else
     echo "   (Non-interactive mode — using default: 1bit)"
@@ -475,6 +541,7 @@ echo "   Model:     ${MODEL_PATH}"
 if [[ -n "${MMPROJ_PATH}" ]]; then echo "   Vision:    ${MMPROJ_PATH}"; fi
 echo "   Endpoint:  http://${HOST}:${FINAL_PORT}"
 echo "   GPU layers: ${NGL}"
+echo "   Context:   ${CONTEXT_SIZE:-0} (0 = model default)"
 echo "   Parallel:   ${PARALLEL:-auto}"
 echo ""
 echo "   Press Ctrl+C to stop."
@@ -486,6 +553,11 @@ if [[ "${PARALLEL}" != "0" && -n "${PARALLEL}" ]]; then
   PARALLEL_ARGS="--parallel ${PARALLEL}"
 fi
 
+# Build context size args
+# CONTEXT_SIZE=0 → model default (~32K)
+# CONTEXT_SIZE=262144 → 262K context (tested on CPU + DDR5, ~4 GB model + ~1.6 GB KV cache)
+CTX_ARGS="-c ${CONTEXT_SIZE}"
+
 exec "${SERVER_BIN}" \
   -m "${MODEL_PATH}" \
   ${MMPROJ_SERVER_ARGS} \
@@ -493,7 +565,7 @@ exec "${SERVER_BIN}" \
   --host "${HOST}" \
   --port "${FINAL_PORT}" \
   -ngl "${NGL}" \
-  -c 0 \
+  ${CTX_ARGS} \
   --temp 0.7 \
   --top-p 0.95 \
   --top-k 40 \

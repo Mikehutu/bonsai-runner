@@ -30,7 +30,8 @@ bash start.sh ternary+dspark   # quality + speed
 
 **Tip:** Run `bash start.sh` with no arguments to auto-detect your hardware
 and get a model recommendation. On interactive terminals, you'll be prompted
-to choose. On SSH/CI, it defaults to `1bit`.
+to choose a variant **and** a context size. On SSH/CI, it defaults to `1bit`
+with the model's default context (~32K).
 
 The script will:
 
@@ -66,6 +67,7 @@ cp .env.example .env
 | `PORT` | `8080` | Server port (auto‑fallbacks to 8081, 8082 if busy) |
 | `HOST` | `0.0.0.0` | Bind address |
 | `NGL` | `99` | GPU layers (Metal/CUDA — ignored on CPU) |
+| `CONTEXT_SIZE` | `0` | Context length in tokens. `0`=model default (~32K). See [Context Sizing](#context-sizing) below. |
 | `PARALLEL` | `0` | Server parallelism: `0`=auto, `1`=single-request (benchmark-safe) |
 | `HF_HUB_OFFLINE` | (unset) | Set to `1` for airgapped machines with pre-cached models |
 
@@ -90,6 +92,77 @@ Then set `HF_HUB_OFFLINE=1` in your shell profile. The `start.sh` script
 automatically unsets this variable during download attempts, so it works
 whether you're online or offline — if the model is already cached, no
 download is attempted.
+
+---
+
+## Context Sizing
+
+Bonsai-27B supports up to **262K tokens** of context — enough to process
+entire codebases, long documents, or multi-hour conversations. The default
+is ~32K (model default), but you can increase it if your machine has enough
+RAM.
+
+### How Context Size Affects RAM
+
+The KV cache grows linearly with context length. Each additional token of
+context costs roughly:
+
+| Variant | KV cache per 1K tokens |
+| --- | --- |
+| **1-bit (Q1_0)** | ~6 MB |
+| **Ternary (Q2_0)** | ~8 MB |
+
+**Formula:** `total RAM needed ≈ model_size + (context_k × kv_per_1k) + 1 GB overhead`
+
+| Context | 1-bit (3.9 GB model) | Ternary (7.2 GB model) |
+| --- | --- | --- |
+| **32K** (default) | ~5.1 GB | ~8.5 GB |
+| **64K** | ~5.5 GB | ~8.9 GB |
+| **128K** | ~6.3 GB | ~9.7 GB |
+| **262K** (max) | ~6.5 GB | ~10.3 GB |
+
+### How to Set Context Size
+
+```bash
+# 262K context (tested on CPU + 48 GB DDR5)
+CONTEXT_SIZE=262144 bash start.sh 1bit
+
+# 128K context (works on 32 GB machines)
+CONTEXT_SIZE=131072 bash start.sh 1bit
+
+# 64K context (works on 16 GB machines)
+CONTEXT_SIZE=65536 bash start.sh 1bit
+
+# Model default (~32K, lowest RAM)
+bash start.sh 1bit
+```
+
+### Auto-Detection
+
+When you run `bash start.sh` with no arguments, the script estimates the
+maximum context your machine can handle based on available RAM and shows
+it in the hardware detection output:
+
+```
+── Model Recommendations ──
+   Context estimate: ~262K tokens (based on 48000 MB RAM)
+   Set CONTEXT_SIZE=268288 for max context, or
+   CONTEXT_SIZE=0 for model default (~32K)
+```
+
+### What Happens If Context Is Too Large?
+
+If you set `CONTEXT_SIZE` higher than your machine can handle:
+
+1. **llama-server will crash on startup** with an out-of-memory error
+2. The error message will mention `llama_kv_cache_init` or `bad_alloc`
+3. **Fix:** Reduce `CONTEXT_SIZE` to a lower value (see table above)
+
+The script does not pre-validate context size against available RAM because
+llama.cpp's actual memory usage depends on many factors (batch size, number
+of layers offloaded to GPU, concurrent requests). The formula above is a
+conservative estimate — start with a lower value and increase until you find
+your machine's sweet spot.
 
 ---
 
@@ -142,9 +215,19 @@ curl http://localhost:8080/v1/chat/completions \
 - On CPU, expect ~16 t/s prompt processing and ~9 t/s generation with images
 
 **Concurrency:** llama-server auto-detects `n_parallel` based on CPU cores.
-On a 24-thread machine, it defaults to 4. To override, add `--parallel N`
-to the `exec` line in `start.sh`. Each slot gets its own KV cache, so memory
-scales linearly. For CPU-only, `--parallel 1` minimizes memory pressure.
+On a 24-thread machine, it defaults to 4. To override, set the `PARALLEL`
+env var:
+
+```bash
+# Single-request mode (benchmark-safe, lowest memory)
+PARALLEL=1 bash start.sh 1bit
+
+# 4 concurrent requests
+PARALLEL=4 bash start.sh ternary
+```
+
+Each slot gets its own KV cache, so memory scales linearly with `PARALLEL`.
+For CPU-only, `PARALLEL=1` minimizes memory pressure.
 
 ### OpenAI‑compatible API
 

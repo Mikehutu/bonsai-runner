@@ -125,6 +125,29 @@ The `start.sh` script passes these flags to `llama-server` for vision support:
 - The prompt cache means follow-up questions about the same image are near-instant
 - On CPU, expect ~16 t/s prompt processing and ~9 t/s generation with images
 
+### Context Size (`CONTEXT_SIZE`)
+
+The `start.sh` script exposes context length via the `CONTEXT_SIZE` env var.
+`0` = model default (~32K). Set to `262144` for 262K context.
+
+**KV cache RAM cost:**
+- 1-bit (Q1_0): ~6 MB per 1K tokens
+- Ternary (Q2_0): ~8 MB per 1K tokens
+
+**Formula:** `total RAM ≈ model_size + (context_k × kv_per_1k) + 1 GB overhead`
+
+When run with no arguments, `start.sh` estimates max context from available
+RAM and shows it in the hardware detection output. The script does NOT
+pre-validate `CONTEXT_SIZE` — if it's too large, llama-server crashes with
+an OOM error. Users should start low and increase.
+
+**To set context size:**
+```bash
+CONTEXT_SIZE=262144 bash start.sh 1bit   # 262K
+CONTEXT_SIZE=131072 bash start.sh 1bit   # 128K
+CONTEXT_SIZE=65536 bash start.sh 1bit    # 64K
+```
+
 ### Concurrency (`n_parallel`)
 
 llama-server auto-detects `n_parallel` based on CPU cores. On a 24-thread

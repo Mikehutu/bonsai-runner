@@ -82,6 +82,8 @@ check "Hardware Detection" "$S" "has hardware detection section"
 check "Model Recommendations" "$S" "has model recommendations section"
 check "MemTotal" "$S" "detects system RAM from /proc/meminfo"
 check "PARALLEL" "$S" "supports PARALLEL env var for benchmark mode"
+check "CONTEXT_SIZE" "$S" "supports CONTEXT_SIZE env var for context length"
+check "Context estimate" "$S" "estimates max context from available RAM"
 check "HF_HUB_OFFLINE" "$S" "handles HF_HUB_OFFLINE for airgapped setups"
 
 # ─── 6. Dry-run flow (prereq detection) ─────────────────────
