@@ -324,14 +324,45 @@ Bonsai 27B is a Qwen3.6‑27B derivative with **hybrid attention** (~75% linear 
 
 ```
 bonsai-runner/
-├── start.sh          # One‑click runner
-├── stop.sh           # Stop the server
+├── start.sh          # One‑click runner (Linux/macOS/WSL)
+├── start.ps1         # Windows runner (native PowerShell)
+├── stop.sh           # Stop the server (Linux/macOS/WSL)
+├── stop.ps1          # Stop the server (Windows)
 ├── AGENTS.md         # Instructions for AI agents
 ├── README.md         # You are here
 └── test-start.sh     # Validation script (not shipped to end users)
 ```
 
 Models and the llama.cpp build are cached under `~/.bonsai/` — re‑running is instant after the first download.
+
+---
+
+## Windows (native PowerShell)
+
+A PowerShell wrapper mirrors `start.sh` — no WSL or Git Bash needed:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File start.ps1                 # bonsai2 (PTQ1_0, default)
+powershell -ExecutionPolicy Bypass -File start.ps1 -Variant bonsai2-pq2
+powershell -ExecutionPolicy Bypass -File stop.ps1                  # stop the server
+```
+
+It downloads the official **PrismML fork prebuilt binary** for Windows (auto-detects your
+GPU: NVIDIA → CUDA, AMD/Intel GPU → Vulkan, none → CPU), then the model + mmproj, then
+starts the server on `:8080`.
+
+- **AMD/Intel iGPU → Vulkan** — this is the path for the Minisforum AI X1 Pro (Radeon 890M,
+  RDNA 3.5). Expect single-digit tok/s; fine for testing, not for production.
+- **NVIDIA → CUDA** — best speed (needs the CUDA runtime; the fork ships `cudart-*` DLL
+  zips separately).
+- **AMD GPU → HIP/Radeon** also exists in the releases; use `-Backend` override if needed.
+
+> **No NPU support.** AMD Ryzen AI (XDNA) has no llama.cpp backend, and the ternary
+> g128 format only has kernels in the PrismML fork (llama.cpp) and MLX (Apple). Windows
+> NPU inference (ONNX Runtime / WinML) would require re-quantizing to a standard format
+> and loses Bonsai's 5.9 GB design. The closest browser option is PrismML's WebGPU demo.
+>
+> Stock llama.cpp cannot load `PTQ1_0`/`PQ2_0` at all — only the fork binaries work.
 
 ---
 
@@ -345,6 +376,7 @@ Models and the llama.cpp build are cached under `~/.bonsai/` — re‑running is
 | **macOS Apple Silicon** (M1–M5) | `uname -m` → `"arm64"` | **Metal** (GPU accelerated) | `sysctl hw.memsize` |
 | **macOS Intel** | `uname -m` → `"x86_64"` | CPU | `sysctl hw.memsize` |
 | **WSL2** (Windows) | `uname` → `"Linux"` | CPU (sees Windows CUDA drivers but ignores them) | `/proc/meminfo` |
+| **Windows native** (no WSL) | `start.ps1` (PowerShell) | CUDA / Vulkan / CPU prebuilt fork binary | `Get-CimInstance Win32_VideoController` |
 
 **Notes:**
 - **CUDA on Linux:** detected via `nvidia-smi`. If the tool exists but reports no GPU (WSL host drivers), falls back to CPU.

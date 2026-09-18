@@ -241,6 +241,12 @@ bash start.sh                # 1-bit (3.9 GB) — auto-detects hardware and reco
 bash start.sh ternary        # ternary (7.2 GB)
 ```
 
+For Windows (native, no WSL):
+
+```powershell
+powershell -ExecutionPolicy Bypass -File start.ps1      # bonsai2 (PTQ1_0)
+```
+
 When run with no arguments, `start.sh` auto-detects the machine's hardware
 (CUDA VRAM, Metal, or system RAM) and recommends the best-fitting model
 variant. On interactive terminals, it prompts the user to choose. On
