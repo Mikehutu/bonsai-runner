@@ -4,10 +4,23 @@ Run a 27B‑class LLM locally with **one command**.
 
 | Variant | Footprint | Quality | Hardware |
 | --- | --- | --- | --- |
-| **1-bit** (Q1_0) | **3.9 GB** | 89.5% of FP16 | CPU, or any GPU with ≥6 GB VRAM |
-| **Ternary** (Q2_0) | **7.2 GB** | 94.6% of FP16 | CPU, or any GPU with ≥10 GB VRAM |
-| **1-bit + DSpark** | 5.7 GB | Lossless speedup | CUDA GPU (speculative decoding) |
-| **Ternary + DSpark** | 9.1 GB | Lossless speedup | CUDA GPU (speculative decoding) |
+| **Bonsai 2** (PTQ1_0) | **6.0 GB** | 98.2% of FP16, thinking model | CPU, or any GPU with ≥8 GB VRAM |
+| **Bonsai 2** (PQ2_0) | **7.2 GB** | 98.2% of FP16, thinking model | CPU, or any GPU with ≥10 GB VRAM |
+| **1-bit** (Q1_0) | **3.9 GB** | 89.5% of FP16 | CPU, or any GPU with ≥6 GB VRAM |
+| **Ternary** (Q2_g64) | **7.2 GB** | 94.6% of FP16 | CPU, or any GPU with ≥10 GB VRAM |
+| **1-bit + DSpark** | 5.7 GB | Lossless speedup (legacy drafter) | CUDA GPU (speculative decoding) |
+| **Ternary + DSpark** | 9.1 GB | Lossless speedup (legacy drafter) | CUDA GPU (speculative decoding) |
+
+> **Bonsai 2** is the new generation (Qwen3.8-27B ternary). It needs the updated
+> PrismML llama.cpp fork (`prism-b10658+`) — `start.sh` updates/re-clones it
+> automatically. The old `ternary` variant now uses the `Q2_g64` file (the
+> legacy `Q2_0` file is refused by post-rebase fork binaries).
+>
+> ⚠ **Known upstream bug** ([PrismML-Eng/llama.cpp#180](https://github.com/PrismML-Eng/llama.cpp/issues/180)):
+> repacking the F32 Hadamard helper tensors segfaults the loader for **PQ2_0**
+> files (PTQ1_0 is unaffected). `start.sh` therefore auto-applies the verified
+> `--no-repack` workaround for the `bonsai2-pq2` variant only (slightly slower).
+> Set `BONSAI2_REPACK=1` to re-enable repacking once upstream lands the fix.
 
 No cloud API. No subscription. Your data stays on your machine.
 
@@ -22,9 +35,13 @@ cd bonsai-runner
 # Default: 1-bit (3.9 GB, works on most GPUs)
 bash start.sh
 
+# Bonsai 2 — the latest generation (thinking model, 262K context):
+bash start.sh bonsai2          # 6.0 GB PTQ1_0 (default pick)
+bash start.sh bonsai2-pq2      # 7.2 GB PQ2_0 (fastest on modern NVIDIA GPUs)
+
 # Or pick a variant:
 bash start.sh ternary          # 7.2 GB, higher quality
-bash start.sh 1bit+dspark      # with speculative decoding
+bash start.sh 1bit+dspark      # with speculative decoding (legacy drafter)
 bash start.sh ternary+dspark   # quality + speed
 ```
 
@@ -248,10 +265,15 @@ curl http://localhost:8080/v1/chat/completions \
 
 | Model | HF repo | Size | Notes |
 | --- | --- | --- | --- |
+| **Ternary-Bonsai-2-27B-PTQ1_0** | [`prism-ml/Ternary-Bonsai-2-27B-gguf`](https://huggingface.co/prism-ml/Ternary-Bonsai-2-27B-gguf) | 6.0 GB | Bonsai 2, ternary g128 — 98.2% of FP16, thinking model (default) |
+| **Ternary-Bonsai-2-27B-PQ2_0** | same repo | 7.2 GB | Bonsai 2, ternary g128 — 98.2% of FP16, fastest on modern NVIDIA |
 | **Bonsai-27B-Q1_0** | [`prism-ml/Bonsai-27B-gguf`](https://huggingface.co/prism-ml/Bonsai-27B-gguf) | 3.9 GB | 1-bit, 89.5% of FP16 |
-| **Ternary-Bonsai-27B-Q2_0** | [`prism-ml/Ternary-Bonsai-27B-gguf`](https://huggingface.co/prism-ml/Ternary-Bonsai-27B-gguf) | 7.2 GB | Ternary, 94.6% of FP16 |
+| **Ternary-Bonsai-27B-Q2_g64** | [`prism-ml/Ternary-Bonsai-27B-gguf`](https://huggingface.co/prism-ml/Ternary-Bonsai-27B-gguf) | 7.2 GB | Ternary, 94.6% of FP16 (official group-64 format) |
 
-Both ship with optional DSpark speculative‑decoding drafters for ~1.35× CUDA decode speedup.
+No DSpark drafter is published for Bonsai 2 — the `+dspark` variants apply only
+to the v1 line, and their published `*dspark-Q4_1.gguf` drafters are legacy
+packings that must be converted (`gguf-dspark-to-dflash`) for post-rebase fork
+binaries; `start.sh` warns when they are used.
 
 ---
 

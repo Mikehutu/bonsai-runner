@@ -14,6 +14,7 @@ H=$(bash "$CD/start.sh" --help 2>&1 || true)
 check "1bit"         "$H" "help lists 1bit variant"
 check "ternary"      "$H" "help lists ternary variant"
 check "dspark"       "$H" "help lists dspark variants"
+check "bonsai2"      "$H" "help lists bonsai2 variant"
 check "PORT"         "$H" "help lists PORT env var"
 check "NGL"          "$H" "help lists NGL env var"
 
@@ -23,6 +24,7 @@ echo "═══ 2. Error handling �══"
 E=$(bash "$CD/start.sh" nonexistent 2>&1 || true)
 check "Unknown variant" "$E" "rejects bad variant"
 check "1bit, ternary"   "$E" "lists valid variants on error"
+check "bonsai2"         "$E" "error message lists bonsai2"
 
 E=$(timeout 5 bash "$CD/start.sh" '' 2>&1 || true)
 check "1bit" "$E" "no-arg defaults to 1bit (no error)"
@@ -35,7 +37,9 @@ echo "═══ 3. Model config resolution �══"
 
 declare -A MODELS
 MODELS[1bit]="prism-ml/Bonsai-27B-gguf|Bonsai-27B-Q1_0.gguf|Bonsai-27B-dspark-Q4_1.gguf|--spec-type draft-dspark --spec-draft-n-max 4|Bonsai-27B-mmproj-Q8_0.gguf"
-MODELS[ternary]="prism-ml/Ternary-Bonsai-27B-gguf|Ternary-Bonsai-27B-Q2_0.gguf|Ternary-Bonsai-27B-dspark-Q4_1.gguf|--spec-type draft-dspark --spec-draft-n-max 4|Ternary-Bonsai-27B-mmproj-Q8_0.gguf"
+MODELS[ternary]="prism-ml/Ternary-Bonsai-27B-gguf|Ternary-Bonsai-27B-Q2_g64.gguf|Ternary-Bonsai-27B-dspark-Q4_1.gguf|--spec-type draft-dspark --spec-draft-n-max 4|Ternary-Bonsai-27B-mmproj-Q8_0.gguf"
+MODELS[bonsai2]="prism-ml/Ternary-Bonsai-2-27B-gguf|Ternary-Bonsai-2-27B-PTQ1_0.gguf|||Ternary-Bonsai-2-27B-mmproj-Q8_0.gguf"
+MODELS[bonsai2-pq2]="prism-ml/Ternary-Bonsai-2-27B-gguf|Ternary-Bonsai-2-27B-PQ2_0.gguf|||Ternary-Bonsai-2-27B-mmproj-Q8_0.gguf"
 
 # 1-bit checks
 IFS='|' read -r R M D A MM <<< "${MODELS[1bit]}"
@@ -48,9 +52,23 @@ check "draft-dspark" "$A" "1bit dspark args include draft-dspark"
 # Ternary checks
 IFS='|' read -r R M D A MM <<< "${MODELS[ternary]}"
 [[ "$R" == "prism-ml/Ternary-Bonsai-27B-gguf"       ]] && pass "ternary HF repo correct"      || fail "ternary HF repo: $R"
-[[ "$M" == "Ternary-Bonsai-27B-Q2_0.gguf"            ]] && pass "ternary model file correct"   || fail "ternary model: $M"
+[[ "$M" == "Ternary-Bonsai-27B-Q2_g64.gguf"          ]] && pass "ternary model file correct"   || fail "ternary model: $M"
 [[ "$D" == "Ternary-Bonsai-27B-dspark-Q4_1.gguf"    ]] && pass "ternary dspark file correct"  || fail "ternary dspark: $D"
 [[ "$MM" == "Ternary-Bonsai-27B-mmproj-Q8_0.gguf"   ]] && pass "ternary mmproj file correct"  || fail "ternary mmproj: $MM"
+
+# Bonsai 2 (PTQ1_0) checks
+IFS='|' read -r R M D A MM <<< "${MODELS[bonsai2]}"
+[[ "$R" == "prism-ml/Ternary-Bonsai-2-27B-gguf"      ]] && pass "bonsai2 HF repo correct"      || fail "bonsai2 HF repo: $R"
+[[ "$M" == "Ternary-Bonsai-2-27B-PTQ1_0.gguf"        ]] && pass "bonsai2 model file correct"   || fail "bonsai2 model: $M"
+[[ -z "$D" ]]                                          && pass "bonsai2 has no drafter"         || fail "bonsai2 drafter unexpected: $D"
+[[ "$MM" == "Ternary-Bonsai-2-27B-mmproj-Q8_0.gguf" ]] && pass "bonsai2 mmproj file correct"  || fail "bonsai2 mmproj: $MM"
+
+# Bonsai 2 (PQ2_0) checks
+IFS='|' read -r R M D A MM <<< "${MODELS[bonsai2-pq2]}"
+[[ "$R" == "prism-ml/Ternary-Bonsai-2-27B-gguf"      ]] && pass "bonsai2-pq2 HF repo correct"  || fail "bonsai2-pq2 HF repo: $R"
+[[ "$M" == "Ternary-Bonsai-2-27B-PQ2_0.gguf"         ]] && pass "bonsai2-pq2 model file correct" || fail "bonsai2-pq2 model: $M"
+[[ -z "$D" ]]                                          && pass "bonsai2-pq2 has no drafter"    || fail "bonsai2-pq2 drafter unexpected: $D"
+[[ "$MM" == "Ternary-Bonsai-2-27B-mmproj-Q8_0.gguf" ]] && pass "bonsai2-pq2 mmproj file correct" || fail "bonsai2-pq2 mmproj: $MM"
 
 # ─── 4. File structure ─────────────────────────────────────
 echo ""

@@ -2,9 +2,11 @@
 # start.sh — Bonsai 27B one‑click runner
 #   bash start.sh                # default: 1-bit (Q1_0, ~3.9 GB)
 #   bash start.sh 1bit           # explicit 1-bit
-#   bash start.sh ternary        # ternary (Q2_0, ~7.2 GB)
+#   bash start.sh ternary        # ternary (Q2_g64, ~7.2 GB)
 #   bash start.sh ternary+dspark # ternary + speculative decoding drafter
 #   bash start.sh 1bit+dspark    # 1-bit + speculative decoding drafter
+#   bash start.sh bonsai2        # Bonsai 2 PTQ1_0 (~6.0 GB) — thinking model (default pick)
+#   bash start.sh bonsai2-pq2    # Bonsai 2 PQ2_0 (~7.2 GB) — fastest on modern NVIDIA GPUs
 set -euo pipefail
 
 # ─── Config ──────────────────────────────────────────────────────────
@@ -22,7 +24,18 @@ CONTEXT_SIZE="${CONTEXT_SIZE:-0}"  # 0 = model default (typically 32K). Set to e
 # (pipe-separated because DSPARK_ARGS contains spaces)
 declare -A MODELS
 MODELS[1bit]="prism-ml/Bonsai-27B-gguf|Bonsai-27B-Q1_0.gguf|Bonsai-27B-dspark-Q4_1.gguf|--spec-type draft-dspark --spec-draft-n-max 4|Bonsai-27B-mmproj-Q8_0.gguf"
-MODELS[ternary]="prism-ml/Ternary-Bonsai-27B-gguf|Ternary-Bonsai-27B-Q2_0.gguf|Ternary-Bonsai-27B-dspark-Q4_1.gguf|--spec-type draft-dspark --spec-draft-n-max 4|Ternary-Bonsai-27B-mmproj-Q8_0.gguf"
+# Old Ternary-Bonsai-27B now ships Q2_g64 (official group-64 format, mainline-compatible).
+# The legacy Q2_0 file (ggml type id 42) is REFUSED by post-rebase fork binaries (prism-b10658+).
+MODELS[ternary]="prism-ml/Ternary-Bonsai-27B-gguf|Ternary-Bonsai-27B-Q2_g64.gguf|Ternary-Bonsai-27B-dspark-Q4_1.gguf|--spec-type draft-dspark --spec-draft-n-max 4|Ternary-Bonsai-27B-mmproj-Q8_0.gguf"
+# Bonsai 2 (Qwen3.8-27B, ternary g128, hybrid attention, 262K ctx, thinking model):
+#   PTQ1_0 = dense trits (1.75 bpw, 5.95 GB) — tighter footprint, faster decode on Ada/L4 (default)
+#   PQ2_0  = 2-bit slots (2.13 bpw, 7.21 GB) — faster prefill everywhere, faster decode on H100/A100/Blackwell/5090
+# No DSpark drafter is published for Bonsai 2.
+# Known upstream bug PrismML-Eng/llama.cpp#180: repack of the Hadamard F32 helper tensors
+# segfaults the loader (CPU repack buffer). Verified workaround: --no-repack (auto-applied;
+# set BONSAI2_REPACK=1 to re-enable repacking once upstream fixes it).
+MODELS[bonsai2]="prism-ml/Ternary-Bonsai-2-27B-gguf|Ternary-Bonsai-2-27B-PTQ1_0.gguf|||Ternary-Bonsai-2-27B-mmproj-Q8_0.gguf"
+MODELS[bonsai2-pq2]="prism-ml/Ternary-Bonsai-2-27B-gguf|Ternary-Bonsai-2-27B-PQ2_0.gguf|||Ternary-Bonsai-2-27B-mmproj-Q8_0.gguf"
 
 # ─── Help ─────────────────────────────────────────────────────────────
 if [[ "${MODEL_VARIANT}" == "-h" || "${MODEL_VARIANT}" == "--help" ]]; then
@@ -30,9 +43,11 @@ if [[ "${MODEL_VARIANT}" == "-h" || "${MODEL_VARIANT}" == "--help" ]]; then
   echo ""
   echo "Variants:"
   echo "  1bit        (default) Bonsai-27B Q1_0      — 3.9 GB, 89.5% of FP16"
-  echo "  ternary     Ternary-Bonsai-27B Q2_0        — 7.2 GB, 94.6% of FP16"
+  echo "  ternary     Ternary-Bonsai-27B Q2_g64      — 7.2 GB, 94.6% of FP16"
   echo "  1bit+dspark 1-bit + DSpark drafter          — 5.7 GB"
   echo "  ternary+dspark Ternary + DSpark drafter     — 9.1 GB"
+  echo "  bonsai2     Bonsai 2 PTQ1_0 (thinking)      — 6.0 GB, 98.2% of FP16 (default pick)"
+  echo "  bonsai2-pq2 Bonsai 2 PQ2_0 (thinking)      — 7.2 GB, 98.2% of FP16 (fastest, --no-repack)"
   echo ""
   echo "Environment variables:"
 echo "  PORT=8080   HOST=0.0.0.0   NGL=99   PARALLEL=0   CONTEXT_SIZE=0"
@@ -52,9 +67,11 @@ case "${MODEL_VARIANT}" in
   ternary)       KEY="ternary"; DSPARK=false ;;
   1bit+dspark)   KEY="1bit"; DSPARK=true   ;;
   ternary+dspark) KEY="ternary"; DSPARK=true ;;
+  bonsai2)       KEY="bonsai2"; DSPARK=false ;;
+  bonsai2-pq2)   KEY="bonsai2-pq2"; DSPARK=false ;;
   *)
     echo "❌ Unknown variant '${MODEL_VARIANT}'"
-    echo "   Valid: 1bit, ternary, 1bit+dspark, ternary+dspark"
+    echo "   Valid: 1bit, ternary, 1bit+dspark, ternary+dspark, bonsai2, bonsai2-pq2"
     exit 1
     ;;
 esac
@@ -147,23 +164,23 @@ if [[ "${1:-}" == "" ]]; then
   echo ""
   echo "── Model Recommendations ──"
   echo "   Available variants:"
-  echo "     1bit        3.9 GB model  — fits in 6 GB VRAM, 5 GB RAM"
+  echo "     bonsai2     6.0 GB model (PTQ1_0) — fits 8 GB VRAM, 10 GB RAM; Bonsai 2 thinking model (default)"
+  echo "     bonsai2-pq2 7.2 GB model (PQ2_0) — fits 10 GB VRAM, 12 GB RAM; fastest on modern NVIDIA"
   echo "     ternary     7.2 GB model  — fits in 10 GB VRAM, 9 GB RAM"
-  echo "     1bit+dspark 5.7 GB model  — CUDA only, needs 8 GB VRAM"
-  echo "     ternary+dspark 9.1 GB model — CUDA only, needs 12 GB VRAM"
+  echo "     1bit        3.9 GB model  — fits in 6 GB VRAM, 5 GB RAM"
+  echo "     1bit+dspark 5.7 GB model  — CUDA only, needs 8 GB VRAM (legacy drafter)"
+  echo "     ternary+dspark 9.1 GB model — CUDA only, needs 12 GB VRAM (legacy drafter)"
   echo ""
 
   # Context size estimation
   # KV cache for a 27B model: ~6 MB per 1K tokens (Q1_0) or ~8 MB (ternary)
   # Formula: available_ram_for_kv = total_ram - model_size - 1 GB overhead
   if [[ "${TOTAL_RAM_MB}" -gt 0 ]]; then
-    if [[ "${KEY}" == "ternary" ]]; then
-      MODEL_SIZE_MB=7200
-      KV_PER_1K_MB=8
-    else
-      MODEL_SIZE_MB=3900
-      KV_PER_1K_MB=6
-    fi
+    case "${KEY}" in
+      ternary|bonsai2-pq2) MODEL_SIZE_MB=7200; KV_PER_1K_MB=8 ;;
+      bonsai2)             MODEL_SIZE_MB=6000; KV_PER_1K_MB=8 ;;
+      *)                   MODEL_SIZE_MB=3900; KV_PER_1K_MB=6 ;;
+    esac
     AVAIL_RAM_MB=$((TOTAL_RAM_MB - MODEL_SIZE_MB - 1024))  # subtract model + 1 GB overhead
     if [[ "${AVAIL_RAM_MB}" -gt 0 ]]; then
       MAX_CTX_K=$((AVAIL_RAM_MB / KV_PER_1K_MB))
@@ -184,9 +201,9 @@ if [[ "${1:-}" == "" ]]; then
   # Recommend based on hardware
   if [[ "${BACKEND}" == "CUDA" ]] && [[ "${TOTAL_VRAM_MB}" -gt 0 ]]; then
     if [[ "${TOTAL_VRAM_MB}" -ge 12000 ]]; then
-      echo "   ✅ Recommended: ternary+dspark (you have ${TOTAL_VRAM_MB} MB VRAM)"
+      echo "   ✅ Recommended: bonsai2-pq2 (you have ${TOTAL_VRAM_MB} MB VRAM)"
     elif [[ "${TOTAL_VRAM_MB}" -ge 8000 ]]; then
-      echo "   ✅ Recommended: 1bit+dspark (you have ${TOTAL_VRAM_MB} MB VRAM)"
+      echo "   ✅ Recommended: bonsai2 (you have ${TOTAL_VRAM_MB} MB VRAM)"
     elif [[ "${TOTAL_VRAM_MB}" -ge 6000 ]]; then
       echo "   ✅ Recommended: 1bit (you have ${TOTAL_VRAM_MB} MB VRAM)"
     else
@@ -195,10 +212,12 @@ if [[ "${1:-}" == "" ]]; then
     fi
   elif [[ "${BACKEND}" == "CUDA" ]]; then
     # Unified memory (VRAM not queryable) — use system RAM as proxy
-    if [[ "${TOTAL_RAM_MB}" -ge 10000 ]]; then
-      echo "   ✅ Recommended: ternary+dspark (CUDA + ${TOTAL_RAM_MB} MB unified RAM)"
+    if [[ "${TOTAL_RAM_MB}" -ge 12000 ]]; then
+      echo "   ✅ Recommended: bonsai2-pq2 (CUDA + ${TOTAL_RAM_MB} MB unified RAM)"
+    elif [[ "${TOTAL_RAM_MB}" -ge 8000 ]]; then
+      echo "   ✅ Recommended: bonsai2 (CUDA + ${TOTAL_RAM_MB} MB unified RAM)"
     elif [[ "${TOTAL_RAM_MB}" -ge 5000 ]]; then
-      echo "   ✅ Recommended: 1bit+dspark (CUDA + ${TOTAL_RAM_MB} MB unified RAM)"
+      echo "   ✅ Recommended: 1bit (smallest footprint)"
     else
       echo "   ✅ Recommended: 1bit (smallest footprint)"
     fi
@@ -206,8 +225,8 @@ if [[ "${1:-}" == "" ]]; then
     echo "   ✅ Recommended: 1bit (Metal, 3.9 GB)"
   else
     # CPU — check RAM
-    if [[ "${TOTAL_RAM_MB}" -ge 10000 ]]; then
-      echo "   ✅ Recommended: ternary (you have ${TOTAL_RAM_MB} MB RAM)"
+    if [[ "${TOTAL_RAM_MB}" -ge 8000 ]]; then
+      echo "   ✅ Recommended: bonsai2 (you have ${TOTAL_RAM_MB} MB RAM)"
     elif [[ "${TOTAL_RAM_MB}" -ge 5000 ]]; then
       echo "   ✅ Recommended: 1bit (you have ${TOTAL_RAM_MB} MB RAM)"
     else
@@ -222,7 +241,7 @@ if [[ "${1:-}" == "" ]]; then
 
   # Interactive prompt if running in a TTY
   if [[ -t 0 ]]; then
-    read -p "Choose variant [1bit/ternary/1bit+dspark/ternary+dspark] (default: 1bit): " CHOSEN
+    read -p "Choose variant [bonsai2/bonsai2-pq2/1bit/ternary/1bit+dspark/ternary+dspark] (default: 1bit): " CHOSEN
     if [[ -n "${CHOSEN}" ]]; then
       MODEL_VARIANT="${CHOSEN}"
       # Re-parse variant after interactive selection
@@ -231,9 +250,11 @@ if [[ "${1:-}" == "" ]]; then
         ternary)       KEY="ternary"; DSPARK=false ;;
         1bit+dspark)   KEY="1bit"; DSPARK=true   ;;
         ternary+dspark) KEY="ternary"; DSPARK=true ;;
+        bonsai2)       KEY="bonsai2"; DSPARK=false ;;
+        bonsai2-pq2)   KEY="bonsai2-pq2"; DSPARK=false ;;
         *)
           echo "❌ Unknown variant '${MODEL_VARIANT}'"
-          echo "   Valid: 1bit, ternary, 1bit+dspark, ternary+dspark"
+          echo "   Valid: 1bit, ternary, 1bit+dspark, ternary+dspark, bonsai2, bonsai2-pq2"
           exit 1
           ;;
       esac
@@ -251,13 +272,11 @@ if [[ "${1:-}" == "" ]]; then
 
     # ── Context size prompt ──────────────────────────────
     # Recalculate context estimate for the chosen variant
-    if [[ "${KEY}" == "ternary" ]]; then
-      MODEL_SIZE_MB=7200
-      KV_PER_1K_MB=8
-    else
-      MODEL_SIZE_MB=3900
-      KV_PER_1K_MB=6
-    fi
+    case "${KEY}" in
+      ternary|bonsai2-pq2) MODEL_SIZE_MB=7200; KV_PER_1K_MB=8 ;;
+      bonsai2)             MODEL_SIZE_MB=6000; KV_PER_1K_MB=8 ;;
+      *)                   MODEL_SIZE_MB=3900; KV_PER_1K_MB=6 ;;
+    esac
     AVAIL_RAM_MB=$((TOTAL_RAM_MB - MODEL_SIZE_MB - 1024))
     MAX_CTX_K=0
     if [[ "${AVAIL_RAM_MB}" -gt 0 ]]; then
@@ -375,7 +394,11 @@ mkdir -p "${HOME}/.bonsai"
 if [[ -d "${LLAMA_CPP_DIR}" ]]; then
   echo "   Repository exists at ${LLAMA_CPP_DIR}"
   echo "   Updating..."
-  (cd "${LLAMA_CPP_DIR}" && git pull --ff-only 2>/dev/null) || echo "   (could not update, using existing)"
+  if ! (cd "${LLAMA_CPP_DIR}" && git pull --ff-only 2>/dev/null); then
+    echo "   Update failed (fork history may have been rebased) — re-cloning..."
+    rm -rf "${LLAMA_CPP_DIR}"
+    git clone --depth 1 -b prism "${LLAMA_CPP_REPO}" "${LLAMA_CPP_DIR}"
+  fi
 else
   echo "   Cloning PrismML fork..."
   git clone --depth 1 -b prism "${LLAMA_CPP_REPO}" "${LLAMA_CPP_DIR}"
@@ -445,7 +468,12 @@ fi
 # Download if still not present
 if [[ ! -f "${MODEL_PATH}" ]]; then
   echo "   Downloading ${HF_REPO}/${MODEL_FILE} from HuggingFace ..."
-  echo "   (This may take a while — file is $( [[ $KEY == "ternary" ]] && echo "~7.2 GB" || echo "~3.9 GB"))"
+  case "${KEY}" in
+    ternary|bonsai2-pq2) SIZE_HINT="~7.2 GB" ;;
+    bonsai2)             SIZE_HINT="~6.0 GB" ;;
+    *)                   SIZE_HINT="~3.9 GB" ;;
+  esac
+  echo "   (This may take a while — file is ${SIZE_HINT})"
   download_model "${HF_REPO}" "${MODEL_FILE}" "${MODELS_DIR}/${KEY}"
   echo "✔  Downloaded: ${MODEL_PATH}"
 fi
@@ -456,6 +484,8 @@ DSPARK_SERVER_ARGS=""
 MMPROJ_PATH=""
 MMPROJ_SERVER_ARGS=""
 if $DSPARK; then
+  echo "   ⚠  Legacy DSpark drafter: published *dspark-Q4_1.gguf packings must be converted"
+  echo "      (via gguf-dspark-to-dflash) for post-rebase fork binaries. See PrismML-Eng/Bonsai-demo SPECULATIVE.md."
   DSPARK_MODEL_PATH="${MODELS_DIR}/${KEY}/${DSPARK_FILE}"
   if [[ -f "${DSPARK_MODEL_PATH}" ]]; then
     echo "✔  Drafter already downloaded: $(du -h "${DSPARK_MODEL_PATH}" | cut -f1)"
@@ -534,6 +564,34 @@ if [[ "${FINAL_PORT}" != "${PORT}" ]]; then
   echo "   Port ${PORT} busy → using port ${FINAL_PORT}"
 fi
 
+# Per-variant server settings
+# Bonsai 2: model-card thinking-mode sampling; flash-attn on; --jinja for native tool calling.
+# Old variants keep the original sampling that was benchmarked with them.
+SAMPLING_ARGS="--temp 0.7 --top-p 0.95 --top-k 40"
+EXTRA_ARGS=""
+case "${KEY}" in
+  bonsai2|bonsai2-pq2)
+    SAMPLING_ARGS="--temp 1.0 --top-p 0.95 --top-k 20 --min-p 0"
+    EXTRA_ARGS="-fa on --jinja"
+    ;;
+esac
+# Upstream bug PrismML-Eng/llama.cpp#180: PQ2_0 repack of the F32 Hadamard helper
+# tensors segfaults the loader (PTQ1_0 is unaffected — verified on CPU and Vulkan).
+# Auto-apply the verified --no-repack workaround for PQ2_0; set BONSAI2_REPACK=1
+# to re-enable repacking once upstream lands the fix.
+if [[ "${KEY}" == "bonsai2-pq2" && "${BONSAI2_REPACK:-0}" != "1" ]]; then
+  EXTRA_ARGS="${EXTRA_ARGS} --no-repack"
+fi
+
+# Bonsai 2 default is 262K context in GGUF metadata; -c 0 would pre-allocate that
+# on every machine and can OOM small boxes. Treat 0 as a safe 32K for Bonsai 2.
+CTX_VALUE="${CONTEXT_SIZE}"
+if [[ "${CTX_VALUE}" == "0" ]]; then
+  case "${KEY}" in
+    bonsai2|bonsai2-pq2) CTX_VALUE=32768 ;;
+  esac
+fi
+
 # ─── Step 5: Start server ────────────────────────────────────────────
 echo ""
 echo "── Step 5: Starting llama-server ──"
@@ -541,8 +599,9 @@ echo "   Model:     ${MODEL_PATH}"
 if [[ -n "${MMPROJ_PATH}" ]]; then echo "   Vision:    ${MMPROJ_PATH}"; fi
 echo "   Endpoint:  http://${HOST}:${FINAL_PORT}"
 echo "   GPU layers: ${NGL}"
-echo "   Context:   ${CONTEXT_SIZE:-0} (0 = model default)"
+echo "   Context:   ${CTX_VALUE} tokens"
 echo "   Parallel:   ${PARALLEL:-auto}"
+if [[ -n "${EXTRA_ARGS}" ]]; then echo "   Extra:      ${EXTRA_ARGS}"; fi
 echo ""
 echo "   Press Ctrl+C to stop, or run ./stop.sh"
 echo ""
@@ -570,9 +629,8 @@ mkdir -p "$(dirname "${PID_FILE}")"
   --port "${FINAL_PORT}" \
   -ngl "${NGL}" \
   ${CTX_ARGS} \
-  --temp 0.7 \
-  --top-p 0.95 \
-  --top-k 40 \
+  ${SAMPLING_ARGS} \
+  ${EXTRA_ARGS} \
   --image-max-tokens 1024 \
   ${PARALLEL_ARGS} &
 SERVER_PID=$!

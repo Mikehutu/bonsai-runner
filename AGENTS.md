@@ -60,7 +60,9 @@ The `start.sh` script uses a `MODELS` associative array to define variants:
 ```bash
 declare -A MODELS
 MODELS[1bit]="prism-ml/Bonsai-27B-gguf|Bonsai-27B-Q1_0.gguf|Bonsai-27B-dspark-Q4_1.gguf|--spec-type draft-dspark --spec-draft-n-max 4|Bonsai-27B-mmproj-Q8_0.gguf"
-MODELS[ternary]="prism-ml/Ternary-Bonsai-27B-gguf|Ternary-Bonsai-27B-Q2_0.gguf|Ternary-Bonsai-27B-dspark-Q4_1.gguf|--spec-type draft-dspark --spec-draft-n-max 4|Ternary-Bonsai-27B-mmproj-Q8_0.gguf"
+MODELS[ternary]="prism-ml/Ternary-Bonsai-27B-gguf|Ternary-Bonsai-27B-Q2_g64.gguf|Ternary-Bonsai-27B-dspark-Q4_1.gguf|--spec-type draft-dspark --spec-draft-n-max 4|Ternary-Bonsai-27B-mmproj-Q8_0.gguf"
+MODELS[bonsai2]="prism-ml/Ternary-Bonsai-2-27B-gguf|Ternary-Bonsai-2-27B-PTQ1_0.gguf|||Ternary-Bonsai-2-27B-mmproj-Q8_0.gguf"
+MODELS[bonsai2-pq2]="prism-ml/Ternary-Bonsai-2-27B-gguf|Ternary-Bonsai-2-27B-PQ2_0.gguf|||Ternary-Bonsai-2-27B-mmproj-Q8_0.gguf"
 ```
 
 Each entry is pipe-separated: `HF_REPO | MODEL_FILE | DSPARK_FILE | DSPARK_ARGS | MMPROJ_FILE`
@@ -146,6 +148,7 @@ an OOM error. Users should start low and increase.
 CONTEXT_SIZE=262144 bash start.sh 1bit   # 262K
 CONTEXT_SIZE=131072 bash start.sh 1bit   # 128K
 CONTEXT_SIZE=65536 bash start.sh 1bit    # 64K
+CONTEXT_SIZE=262144 bash start.sh bonsai2 # 262K (Bonsai 2; 0 = safe 32K)
 ```
 
 ### Concurrency (`n_parallel`)
@@ -179,8 +182,31 @@ which contaminates latency measurements.
 
 | Variant | Model File | mmproj File | DSPark | Size | Quality |
 |---|---|---|---|---|---|
-| `1bit` | `Bonsai-27B-Q1_0.gguf` | `Bonsai-27B-mmproj-Q8_0.gguf` | optional | 3.9 GB | 89.5% FP16 |
-| `ternary` | `Ternary-Bonsai-27B-Q2_0.gguf` | `Ternary-Bonsai-27B-mmproj-Q8_0.gguf` | optional | 7.2 GB | 94.6% FP16 |
+| `1bit` | `Bonsai-27B-Q1_0.gguf` | `Bonsai-27B-mmproj-Q8_0.gguf` | optional (legacy drafter) | 3.9 GB | 89.5% FP16 |
+| `ternary` | `Ternary-Bonsai-27B-Q2_g64.gguf` | `Ternary-Bonsai-27B-mmproj-Q8_0.gguf` | optional (legacy drafter) | 7.2 GB | 94.6% FP16 |
+| `bonsai2` | `Ternary-Bonsai-2-27B-PTQ1_0.gguf` | `Ternary-Bonsai-2-27B-mmproj-Q8_0.gguf` | none | 6.0 GB | 98.2% FP16 (thinking) — default |
+| `bonsai2-pq2` | `Ternary-Bonsai-2-27B-PQ2_0.gguf` | `Ternary-Bonsai-2-27B-mmproj-Q8_0.gguf` | none | 7.2 GB | 98.2% FP16 (thinking) |
+
+### Bonsai 2 specifics
+
+- Requires the post-rebase PrismML fork (`prism-b10658+`). `start.sh` runs
+  `git pull --ff-only` and **re-clones the fork if the pull fails** (the fork
+  rebases history, so a shallow clone can go stale).
+- Sampling is per-variant: Bonsai 2 uses the model card's thinking-mode
+  defaults (`--temp 1.0 --top-p 0.95 --top-k 20 --min-p 0` plus `-fa on`
+  and `--jinja` for native tool calling). Old variants keep their original
+  sampling.
+- `CONTEXT_SIZE=0` maps to a safe **32K** for Bonsai 2 (its GGUF metadata
+  default is 262K, which can OOM small machines). `262144` = full 262K.
+- Packing choice: `PQ2_0` (2-bit slots, 7.21 GB) is faster at prefill
+  everywhere and faster at decode on H100/A100/Blackwell/RTX 5090;
+  `PTQ1_0` (dense trits, 5.95 GB) is tighter and faster at decode on
+  Ada-generation and L4. Neither runs on stock llama.cpp.
+- Known upstream bug (PrismML-Eng/llama.cpp#180): `PQ2_0` repack of the
+  F32 Hadamard helper tensors segfaults the loader. `start.sh` auto-applies
+  `--no-repack` for `bonsai2-pq2` only (verified workaround); `bonsai2`
+  (PTQ1_0) is unaffected and keeps repack on. `BONSAI2_REPACK=1` re-enables
+  repacking for PQ2_0 once upstream fixes it.
 
 Both variants share the same vision tower format (Q8_0 mmproj). The ternary
 variant has higher image quality due to better overall model precision.
